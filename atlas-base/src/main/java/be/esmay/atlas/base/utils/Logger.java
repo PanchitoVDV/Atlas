@@ -32,8 +32,27 @@ public class Logger {
             "\u001B[38;2;0;255;130m"
     };
 
+    private static final boolean IS_WINDOWS = System.getProperty("os.name").toLowerCase().contains("win");
+
     public static void printBanner() {
         System.out.println();
+
+        if (IS_WINDOWS) {
+            String[] bannerLines = {
+                "    Atlas Scaler v1.0.0",
+                "    -------------------",
+                "    Java: " + System.getProperty("java.version"),
+                "    OS: " + System.getProperty("os.name") + " " + System.getProperty("os.version"),
+                "    Memory: " + (Runtime.getRuntime().maxMemory() / (1024 * 1024)) + " MB"
+            };
+
+            for (String line : bannerLines) {
+                System.out.println(line);
+            }
+
+            System.out.println();
+            return;
+        }
 
         String[] bannerLines = {
                 "        █████╗ ████████╗██╗      █████╗ ███████╗",
@@ -135,6 +154,13 @@ public class Logger {
     }
 
     private static void log(String icon, String color, String message) {
+        if (IS_WINDOWS) {
+            String timestamp = LocalTime.now().format(TIME_FORMAT);
+
+            System.out.printf("[%s] %s %s%n", timestamp, "[INFO]", message);
+            return;
+        }
+
         String timestamp = LocalTime.now().format(TIME_FORMAT);
         System.out.printf(
                 "%s%s%s %s%s%s %s%s%s%n",
@@ -145,6 +171,15 @@ public class Logger {
     }
 
     private static void log(String icon, String color, String message, Throwable t) {
+        if (IS_WINDOWS) {
+            log(icon, color, message);
+            if (t != null) {
+                System.out.println("    Exception: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+            }
+
+            return;
+        }
+
         log(icon, color, message);
         if (t != null) {
             System.out.println(DIM + "  ┌─ " + t.getClass().getSimpleName() + ": " +
