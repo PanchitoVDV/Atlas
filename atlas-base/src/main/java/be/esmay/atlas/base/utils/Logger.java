@@ -1,7 +1,12 @@
 package be.esmay.atlas.base.utils;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class Logger {
 
@@ -33,17 +38,78 @@ public class Logger {
     };
 
     private static final boolean IS_WINDOWS = System.getProperty("os.name").toLowerCase().contains("win");
+    private static final boolean IS_LINUX = System.getProperty("os.name").toLowerCase().contains("linux");
+    private static final String VERSION = getProjectVersion();
+
+    private static String getProjectVersion() {
+        try {
+            Path currentPath = Paths.get("").toAbsolutePath();
+            Path buildFile = findBuildFile(currentPath);
+
+            if (buildFile != null) {
+                String content = Files.readString(buildFile);
+                Pattern pattern = Pattern.compile("version\\s*=\\s*\"([^\"]+)\"");
+                Matcher matcher = pattern.matcher(content);
+
+                if (matcher.find()) {
+                    return matcher.group(1);
+                }
+            }
+        } catch (Exception e) {
+            warn("Failed to read version from build.gradle.kts: " + e.getMessage());
+        }
+
+        return "1.0.0";
+    }
+
+    private static Path findBuildFile(Path startPath) {
+        Path buildFile = startPath.resolve("build.gradle.kts");
+        if (Files.exists(buildFile)) {
+            return buildFile;
+        }
+
+        if (startPath.getParent() != null) {
+            buildFile = startPath.getParent().resolve("build.gradle.kts");
+            if (Files.exists(buildFile)) {
+                return buildFile;
+            }
+        }
+
+        return null;
+    }
+
+    private static String getLogIcon(String type) {
+        if (IS_WINDOWS || IS_LINUX) {
+            return switch (type) {
+                case "info" -> "i ";
+                case "success" -> "+ ";
+                case "warn" -> "! ";
+                case "error" -> "x ";
+                case "debug" -> ". ";
+                default -> "> ";
+            };
+        }
+
+        return switch (type) {
+            case "info" -> "ℹ ";
+            case "success" -> "✔ ";
+            case "warn" -> "⚠ ";
+            case "error" -> "✖ ";
+            case "debug" -> "· ";
+            default -> "• ";
+        };
+    }
 
     public static void printBanner() {
         System.out.println();
 
         if (IS_WINDOWS) {
             String[] bannerLines = {
-                "    Atlas Scaler v1.0.0",
-                "    -------------------",
-                "    Java: " + System.getProperty("java.version"),
-                "    OS: " + System.getProperty("os.name") + " " + System.getProperty("os.version"),
-                "    Memory: " + (Runtime.getRuntime().maxMemory() / (1024 * 1024)) + " MB"
+                    "    Atlas Scaler v" + VERSION,
+                    "    -------------------",
+                    "    Java: " + System.getProperty("java.version"),
+                    "    OS: " + System.getProperty("os.name") + " " + System.getProperty("os.version"),
+                    "    Memory: " + (Runtime.getRuntime().maxMemory() / (1024 * 1024)) + " MB"
             };
 
             for (String line : bannerLines) {
@@ -77,7 +143,7 @@ public class Logger {
 
         int boxWidth = 54;
 
-        String titleLine = String.format("  %s%s%s v1.0.0", BRIGHT_CYAN, BOLD + "Atlas Scaler" + RESET, RESET + DIM);
+        String titleLine = String.format("  %s%s%s v%s", BRIGHT_CYAN, BOLD + "Atlas Scaler" + RESET, RESET + DIM, VERSION);
         String javaLine = String.format("  • Java: %s%s%s", BRIGHT_WHITE, javaVersion, RESET + DIM);
         String osLine = String.format("  • OS: %s%s %s%s", BRIGHT_WHITE, osName, osVersion, RESET + DIM);
         String memoryLine = String.format("  • Memory: %s%d MB%s", BRIGHT_WHITE, maxMemoryMB, RESET + DIM);
@@ -114,43 +180,43 @@ public class Logger {
     }
 
     public static void info(String message, Object... args) {
-        log("ℹ", BLUE, format(message, args));
+        log(getLogIcon("info"), BLUE, format(message, args));
     }
 
     public static void info(String message, Throwable t) {
-        log("ℹ", BLUE, message, t);
+        log(getLogIcon("info"), BLUE, message, t);
     }
 
     public static void success(String message, Object... args) {
-        log("✓", GREEN, format(message, args));
+        log(getLogIcon("success"), GREEN, format(message, args));
     }
 
     public static void success(String message, Throwable t) {
-        log("✓", GREEN, message, t);
+        log(getLogIcon("success"), GREEN, message, t);
     }
 
     public static void warn(String message, Object... args) {
-        log("⚠", YELLOW, format(message, args));
+        log(getLogIcon("warn"), YELLOW, format(message, args));
     }
 
     public static void warn(String message, Throwable t) {
-        log("⚠", YELLOW, message, t);
+        log(getLogIcon("warn"), YELLOW, message, t);
     }
 
     public static void error(String message, Object... args) {
-        log("✗", RED, format(message, args));
+        log(getLogIcon("error"), RED, format(message, args));
     }
 
     public static void error(String message, Throwable t) {
-        log("✗", RED, message, t);
+        log(getLogIcon("error"), RED, message, t);
     }
 
     public static void debug(String message, Object... args) {
-        log("◦", PURPLE, format(message, args));
+        log(getLogIcon("debug"), PURPLE, format(message, args));
     }
 
     public static void debug(String message, Throwable t) {
-        log("◦", PURPLE, message, t);
+        log(getLogIcon("debug"), PURPLE, message, t);
     }
 
     private static void log(String icon, String color, String message) {

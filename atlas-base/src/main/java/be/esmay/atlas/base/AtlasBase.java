@@ -4,6 +4,7 @@ import be.esmay.atlas.base.utils.Logger;
 import lombok.Getter;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -19,18 +20,13 @@ public final class AtlasBase {
 
     private volatile boolean running = false;
     private final Object shutdownLock = new Object();
+    private final CountDownLatch shutdownLatch = new CountDownLatch(1);
 
     public AtlasBase() {
         instance = this;
 
         this.executorService = Executors.newVirtualThreadPerTaskExecutor();
-
-        Logger.printBanner();
-        Logger.info("Initializing Atlas...");
-
         Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown, "Atlas-Shutdown"));
-
-        Logger.info("Atlas initialization completed successfully.");
     }
 
     public void start() {
@@ -41,13 +37,15 @@ public final class AtlasBase {
             }
 
             try {
-                Logger.info("Starting Atlas components...");
+                Logger.printBanner();
+                Logger.info("Starting Atlas...");
 
                 this.running = true;
                 Logger.info("Atlas is now running and ready to use.");
             } catch (Exception e) {
                 Logger.error("Failed to start Atlas", e);
-                shutdown();
+                this.shutdown();
+
                 throw new RuntimeException("Atlas startup failed", e);
             }
         }
@@ -55,30 +53,35 @@ public final class AtlasBase {
 
     public void shutdown() {
         synchronized (this.shutdownLock) {
-            if (!this.running)
-                return;
+            if (!this.running) return;
 
             Logger.info("Atlas is shutting down...");
             this.running = false;
 
             try {
-                if (this.executorService != null && !this.executorService.isShutdown()) {
-                    this.executorService.shutdown();
-
-                    try {
-                        if (!this.executorService.awaitTermination(10, TimeUnit.SECONDS)) {
-                            this.executorService.shutdownNow();
-                        }
-                    } catch (InterruptedException e) {
-                        this.executorService.shutdownNow();
-                        Thread.currentThread().interrupt();
-                    }
-                }
+                this.shutdownExecutorService();
 
                 Logger.info("Atlas has been stopped successfully.");
             } catch (Exception e) {
                 Logger.error("Error during Atlas shutdown", e);
+            } finally {
+                this.shutdownLatch.countDown();
             }
+        }
+    }
+
+    private void shutdownExecutorService() {
+        if (this.executorService == null || this.executorService.isShutdown()) return;
+
+        this.executorService.shutdown();
+
+        try {
+            if (!this.executorService.awaitTermination(10, TimeUnit.SECONDS)) {
+                this.executorService.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            this.executorService.shutdownNow();
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -95,16 +98,10 @@ public final class AtlasBase {
             AtlasBase atlasBase = new AtlasBase();
             atlasBase.start();
 
-            synchronized (atlasBase.shutdownLock) {
-                while (atlasBase.running) {
-                    try {
-                        atlasBase.shutdownLock.wait();
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
-                }
-            }
+            atlasBase.shutdownLatch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            Logger.error("Atlas was interrupted", e);
         } catch (Exception e) {
             Logger.error("Failed to initialize Atlas", e);
             System.exit(1);
