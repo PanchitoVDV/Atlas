@@ -109,8 +109,7 @@ public final class AtlasBase {
                 }
             }
         } catch (Exception e) {
-            System.err.println("Failed to start Atlas: " + e.getMessage());
-            e.printStackTrace();
+            Logger.error("Failed to initialize Atlas", e);
             System.exit(1);
         }
     }
