@@ -11,45 +11,79 @@ public class Logger {
     private static final String YELLOW = "\u001B[33m";
     private static final String BLUE = "\u001B[34m";
     private static final String PURPLE = "\u001B[35m";
-    private static final String CYAN = "\u001B[36m";
-    private static final String WHITE = "\u001B[37m";
+
+    private static final String BRIGHT_RED = "\u001B[91m";
+    private static final String BRIGHT_CYAN = "\u001B[96m";
+    private static final String BRIGHT_WHITE = "\u001B[97m";
+
     private static final String BOLD = "\u001B[1m";
     private static final String DIM = "\u001B[2m";
 
     private static final DateTimeFormatter TIME_FORMAT =
             DateTimeFormatter.ofPattern("HH:mm:ss");
 
+    private static final String[] GRADIENT_COLORS = {
+            "\u001B[38;2;0;130;255m",
+            "\u001B[38;2;0;150;230m",
+            "\u001B[38;2;0;170;210m",
+            "\u001B[38;2;0;190;190m",
+            "\u001B[38;2;0;210;170m",
+            "\u001B[38;2;0;230;150m",
+            "\u001B[38;2;0;255;130m"
+    };
+
     public static void printBanner() {
         System.out.println();
-        System.out.println(
-                CYAN + BOLD +
-                        "     ██████╗ ████████╗██╗      █████╗ ███████╗" + RESET
-        );
-        System.out.println(
-                CYAN + BOLD +
-                        "    ██╔══██╗╚══██╔══╝██║     ██╔══██╗██╔════╝" + RESET
-        );
-        System.out.println(
-                CYAN + BOLD +
-                        "    ███████║   ██║   ██║     ███████║███████╗" + RESET
-        );
-        System.out.println(
-                CYAN + BOLD +
-                        "    ██╔══██║   ██║   ██║     ██╔══██║╚════██║" + RESET
-        );
-        System.out.println(
-                CYAN + BOLD +
-                        "    ██║  ██║   ██║   ███████╗██║  ██║███████║" + RESET
-        );
-        System.out.println(
-                CYAN + BOLD +
-                        "    ╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝╚══════╝" + RESET
-        );
+
+        String[] bannerLines = {
+                "        █████╗ ████████╗██╗      █████╗ ███████╗",
+                "       ██╔══██╗╚══██╔══╝██║     ██╔══██╗██╔════╝",
+                "       ███████║   ██║   ██║     ███████║███████╗",
+                "       ██╔══██║   ██║   ██║     ██╔══██║╚════██║",
+                "       ██║  ██║   ██║   ███████╗██║  ██║███████║",
+                "       ╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝╚══════╝"
+        };
+
+        for (String bannerLine : bannerLines) {
+            printGradientLine(bannerLine, BOLD);
+        }
+
         System.out.println();
-        System.out.println(
-                DIM + "           Minecraft Server Scaler v1.0.0" + RESET
-        );
+
+        String javaVersion = System.getProperty("java.version");
+        String osName = System.getProperty("os.name");
+        String osVersion = System.getProperty("os.version");
+        Runtime runtime = Runtime.getRuntime();
+        long maxMemoryMB = runtime.maxMemory() / (1024 * 1024);
+
+        System.out.println(DIM + "┌─────────────────────────────────────────────────┐" + RESET);
+        System.out.println(DIM + "│" + RESET + BRIGHT_CYAN + BOLD + "  Atlas Scaler" + RESET + DIM + " v1.0.0                          │" + RESET);
+        System.out.println(DIM + "├─────────────────────────────────────────────────┤" + RESET);
+        System.out.println(DIM + "│" + RESET + "  🔹 Java: " + BRIGHT_WHITE + javaVersion + RESET + DIM + "                              │" + RESET);
+        System.out.println(DIM + "│" + RESET + "  🔹 OS: " + BRIGHT_WHITE + osName + " " + osVersion + RESET + DIM + "                   │" + RESET);
+        System.out.println(DIM + "│" + RESET + "  🔹 Memory: " + BRIGHT_WHITE + maxMemoryMB + "MB" + RESET + DIM + "                          │" + RESET);
+        System.out.println(DIM + "└─────────────────────────────────────────────────┘" + RESET);
         System.out.println();
+    }
+
+    private static void printGradientLine(String text, String... styles) {
+        StringBuilder sb = new StringBuilder();
+        int colorCount = GRADIENT_COLORS.length;
+        int textLength = text.length();
+
+        for (int i = 0; i < textLength; i++) {
+            int colorIndex = Math.min((i * colorCount) / textLength, colorCount - 1);
+            sb.append(GRADIENT_COLORS[colorIndex]);
+
+            for (String style : styles) {
+                sb.append(style);
+            }
+
+            sb.append(text.charAt(i));
+            sb.append(RESET);
+        }
+
+        System.out.println(sb);
     }
 
     public static void info(String message, Object... args) {
@@ -95,18 +129,40 @@ public class Logger {
     private static void log(String icon, String color, String message) {
         String timestamp = LocalTime.now().format(TIME_FORMAT);
         System.out.printf(
-                "%s%s%s %s[%s]%s %s%n",
+                "%s%s%s %s%s%s %s%s%s%n",
                 DIM, timestamp, RESET,
-                color, icon, RESET,
-                message
+                BOLD, color, icon, RESET,
+                BRIGHT_WHITE, message
         );
     }
 
     private static void log(String icon, String color, String message, Throwable t) {
         log(icon, color, message);
         if (t != null) {
-            System.out.println(DIM + "    " + t.getClass().getSimpleName() +
-                    ": " + t.getMessage() + RESET);
+            System.out.println(DIM + "  ┌─ " + t.getClass().getSimpleName() + ": " +
+                    BRIGHT_RED + t.getMessage() + RESET);
+
+            StackTraceElement[] elements = t.getStackTrace();
+            int linesToShow = Math.min(elements.length, 3);
+
+            for (int i = 0; i < linesToShow; i++) {
+                StackTraceElement element = elements[i];
+                String className = element.getClassName();
+                String methodName = element.getMethodName();
+                int lineNumber = element.getLineNumber();
+
+                String shortClassName = className.substring(className.lastIndexOf('.') + 1);
+
+                System.out.println(DIM + "  │  at " + shortClassName + "." +
+                        methodName + "(" + lineNumber + ")" + RESET);
+            }
+
+            if (elements.length > linesToShow) {
+                System.out.println(DIM + "  └─ ... " + (elements.length - linesToShow) +
+                        " more" + RESET);
+            } else {
+                System.out.println(DIM + "  └─" + RESET);
+            }
         }
     }
 
