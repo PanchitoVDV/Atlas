@@ -207,7 +207,7 @@ public class Logger {
     private static String padRight(String s, int length) {
         int visibleLength = s.replaceAll("\u001B\\[[;\\d]*m", "").length();
         if (visibleLength >= length) return s;
-        
+
         return s + " ".repeat(length - visibleLength);
     }
 }

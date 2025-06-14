@@ -92,9 +92,6 @@ public final class AtlasBase {
 
     public static void main(String[] args) {
         try {
-            System.setProperty("java.util.logging.manager", "org.slf4j.bridge.SLF4JBridgeHandler");
-            System.setProperty("file.encoding", "UTF-8");
-
             AtlasBase atlasBase = new AtlasBase();
             atlasBase.start();
 
