@@ -56,13 +56,21 @@ public class Logger {
         Runtime runtime = Runtime.getRuntime();
         long maxMemoryMB = runtime.maxMemory() / (1024 * 1024);
 
-        System.out.println(DIM + "┌─────────────────────────────────────────────────┐" + RESET);
-        System.out.println(DIM + "│" + RESET + BRIGHT_CYAN + BOLD + "  Atlas Scaler" + RESET + DIM + " v1.0.0                          │" + RESET);
-        System.out.println(DIM + "├─────────────────────────────────────────────────┤" + RESET);
-        System.out.println(DIM + "│" + RESET + "  🔹 Java: " + BRIGHT_WHITE + javaVersion + RESET + DIM + "                              │" + RESET);
-        System.out.println(DIM + "│" + RESET + "  🔹 OS: " + BRIGHT_WHITE + osName + " " + osVersion + RESET + DIM + "                   │" + RESET);
-        System.out.println(DIM + "│" + RESET + "  🔹 Memory: " + BRIGHT_WHITE + maxMemoryMB + "MB" + RESET + DIM + "                          │" + RESET);
-        System.out.println(DIM + "└─────────────────────────────────────────────────┘" + RESET);
+        int boxWidth = 54;
+
+        String titleLine = String.format("  %s%s%s v1.0.0", BRIGHT_CYAN, BOLD + "Atlas Scaler" + RESET, RESET + DIM);
+        String javaLine = String.format("  • Java: %s%s%s", BRIGHT_WHITE, javaVersion, RESET + DIM);
+        String osLine = String.format("  • OS: %s%s %s%s", BRIGHT_WHITE, osName, osVersion, RESET + DIM);
+        String memoryLine = String.format("  • Memory: %s%d MB%s", BRIGHT_WHITE, maxMemoryMB, RESET + DIM);
+
+        String horizontalLine = "─".repeat(boxWidth - 2);
+        System.out.println(DIM + "┌" + horizontalLine + "┐" + RESET);
+        System.out.println(DIM + "│" + RESET + padRight(titleLine, boxWidth - 2) + DIM + "│" + RESET);
+        System.out.println(DIM + "├" + horizontalLine + "┤" + RESET);
+        System.out.println(DIM + "│" + RESET + padRight(javaLine, boxWidth - 2) + DIM + "│" + RESET);
+        System.out.println(DIM + "│" + RESET + padRight(osLine, boxWidth - 2) + DIM + "│" + RESET);
+        System.out.println(DIM + "│" + RESET + padRight(memoryLine, boxWidth - 2) + DIM + "│" + RESET);
+        System.out.println(DIM + "└" + horizontalLine + "┘" + RESET);
         System.out.println();
     }
 
@@ -194,5 +202,12 @@ public class Logger {
             sb.append("]");
         }
         return sb.toString();
+    }
+
+    private static String padRight(String s, int length) {
+        int visibleLength = s.replaceAll("\u001B\\[[;\\d]*m", "").length();
+        if (visibleLength >= length) return s;
+        
+        return s + " ".repeat(length - visibleLength);
     }
 }
