@@ -1,5 +1,6 @@
 package be.esmay.atlas.base;
 
+import be.esmay.atlas.base.commands.CommandManager;
 import be.esmay.atlas.base.config.ConfigManager;
 import be.esmay.atlas.base.scaler.ScalerManager;
 import be.esmay.atlas.base.utils.Logger;
@@ -21,6 +22,7 @@ public final class AtlasBase {
     private final ExecutorService executorService;
     private final ConfigManager configManager;
     private final ScalerManager scalerManager;
+    private final CommandManager commandManager;
 
     private volatile boolean running = false;
     private final Object shutdownLock = new Object();
@@ -32,6 +34,7 @@ public final class AtlasBase {
         this.executorService = Executors.newVirtualThreadPerTaskExecutor();
         this.configManager = new ConfigManager();
         this.scalerManager = new ScalerManager();
+        this.commandManager = new CommandManager(this);
 
         Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown, "Atlas-Shutdown"));
     }
@@ -49,6 +52,7 @@ public final class AtlasBase {
 
                 this.configManager.initialize();
                 this.scalerManager.initialize();
+                this.commandManager.initialize();
 
                 this.running = true;
                 Logger.info("Atlas is now running and ready to use.");
@@ -73,6 +77,9 @@ public final class AtlasBase {
 
                 if (this.scalerManager != null)
                     this.scalerManager.shutdown();
+
+                if (this.commandManager != null)
+                    this.commandManager.shutdown();
 
                 Logger.info("Atlas has been stopped successfully.");
             } catch (Exception e) {
