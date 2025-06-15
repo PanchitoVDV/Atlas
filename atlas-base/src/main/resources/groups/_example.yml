@@ -1,0 +1,32 @@
+group:
+  name: "lobby"
+  display-name: "Lobby Servers"
+
+  server:
+    type: "dynamic" # or static
+    naming:
+      identifier: "uuid" # or numeric
+      naming-pattern: "lobby-{id}"
+    min-servers: 2
+    max-servers: 10
+    max-players-per-server: 50
+
+  scaling:
+    type: "player-count" # player-count, group-player, peak-time
+    conditions:
+      scale-up-threshold: 0.8 # 80% capacity
+      scale-down-threshold: 0.3 # 30% capacity
+      min-empty-servers: 1
+
+  templates:
+    - "global/lobby"
+    - "lobby/default"
+
+  service-provider:
+    docker:
+      image: "openjdk:21-jre-slim"
+      memory: "2G"
+      cpu: "1.0"
+      command: "java -Xmx1536M -Xms1536M -jar server.jar nogui"
+      environment:
+        VERSION: "1.21.5"
