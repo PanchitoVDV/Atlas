@@ -142,8 +142,7 @@ public final class CommandManager {
             this.primaryCommands.values().forEach(cmd -> {
                 System.out.printf("  %-12s - %s%n", cmd.getName(), cmd.getDescription());
                 if (!cmd.getAliases().isEmpty()) {
-                    System.out.printf("               Aliases: %s%n",
-                            String.join(", ", cmd.getAliases()));
+                    System.out.printf("               Aliases: %s%n", String.join(", ", cmd.getAliases()));
                 }
             });
 
@@ -166,20 +165,17 @@ public final class CommandManager {
             String cmdName = BRIGHT_WHITE + BOLD + cmd.getName() + RESET;
             String desc = DIM + cmd.getDescription() + RESET;
 
-            System.out.printf("  %s%s %s%n",
-                    GREEN + "▸ " + RESET, cmdName, desc);
+            System.out.printf("  %s%s %s%n", GREEN + "▸ " + RESET, cmdName, desc);
 
             if (!cmd.getAliases().isEmpty()) {
-                String aliases = cmd.getAliases().stream()
-                        .collect(Collectors.joining(DIM + ", " + RESET + YELLOW, YELLOW, RESET));
+                String aliases = cmd.getAliases().stream().collect(Collectors.joining(DIM + ", " + RESET + YELLOW, YELLOW, RESET));
                 System.out.printf("    %sAliases: %s%n", DIM, aliases);
             }
 
             System.out.println();
         });
 
-        System.out.println(DIM + "  Type " + BRIGHT_CYAN + "help <command>" + RESET +
-                DIM + " for detailed information" + RESET);
+        System.out.println(DIM + "  Type " + BRIGHT_CYAN + "help <command>" + RESET + DIM + " for detailed information" + RESET);
         System.out.println();
     }
 
@@ -212,20 +208,17 @@ public final class CommandManager {
         System.out.println("  " + DIM + "  Description: " + command.getDescription() + RESET);
 
         if (!command.getAliases().isEmpty()) {
-            String aliases = command.getAliases().stream()
-                    .collect(Collectors.joining(DIM + ", " + RESET + YELLOW, YELLOW, RESET));
+            String aliases = command.getAliases().stream().collect(Collectors.joining(DIM + ", " + RESET + YELLOW, YELLOW, RESET));
             System.out.println("  " + DIM + "  Aliases: " + aliases);
         }
 
-        System.out.println("  " + DIM + "  Usage: " + BRIGHT_CYAN +
-                command.getUsage() + RESET);
+        System.out.println("  " + DIM + "  Usage: " + BRIGHT_CYAN + command.getUsage() + RESET);
         System.out.println();
     }
 
     private void showCommandNotFound(String commandName) {
         if (IS_WINDOWS) {
-            System.out.println("Unknown command: " + commandName +
-                    ". Type 'help' for available commands.");
+            System.out.println("Unknown command: " + commandName + ". Type 'help' for available commands.");
             return;
         }
 
@@ -235,21 +228,17 @@ public final class CommandManager {
         System.out.println("  " + RED + "✖ " + RESET + message);
 
         if (!suggestions.isEmpty()) {
-            String suggestionText = suggestions.stream()
-                    .collect(Collectors.joining(RESET + DIM + ", " + BRIGHT_CYAN,
-                            BRIGHT_CYAN, RESET));
+            String suggestionText = suggestions.stream().collect(Collectors.joining(RESET + DIM + ", " + BRIGHT_CYAN, BRIGHT_CYAN, RESET));
             System.out.println("  " + DIM + "  Did you mean: " + suggestionText + RESET);
         }
 
-        System.out.println("  " + DIM + "  Type " + BRIGHT_CYAN + "help" + RESET +
-                DIM + " for available commands" + RESET);
+        System.out.println("  " + DIM + "  Type " + BRIGHT_CYAN + "help" + RESET + DIM + " for available commands" + RESET);
         System.out.println();
     }
 
     private List<String> findSimilarCommands(String input) {
         return this.primaryCommands.keySet().stream()
-                .filter(cmd -> cmd.toLowerCase().startsWith(input.toLowerCase()) ||
-                        levenshteinDistance(cmd.toLowerCase(), input.toLowerCase()) <= 2)
+                .filter(cmd -> cmd.toLowerCase().startsWith(input.toLowerCase()) || levenshteinDistance(cmd.toLowerCase(), input.toLowerCase()) <= 2)
                 .limit(3)
                 .collect(Collectors.toList());
     }
