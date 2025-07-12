@@ -4,6 +4,7 @@ import be.esmay.atlas.base.commands.CommandManager;
 import be.esmay.atlas.base.config.ConfigManager;
 import be.esmay.atlas.base.scaler.ScalerManager;
 import be.esmay.atlas.base.utils.Logger;
+import be.esmay.atlas.common.utils.TimeEntry;
 import lombok.Getter;
 
 import java.util.concurrent.CompletableFuture;
