@@ -1,5 +1,9 @@
 package be.esmay.atlas.base.utils;
 
+import lombok.experimental.UtilityClass;
+import org.jline.reader.LineReader;
+import org.jline.terminal.Terminal;
+
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -8,7 +12,12 @@ import java.time.format.DateTimeFormatter;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class Logger {
+@UtilityClass
+public final class Logger {
+
+    private static boolean DEBUG_MODE = false;
+    private static Terminal TERMINAL = null;
+    private static LineReader LINE_READER = null;
 
     private static final String RESET = "\u001B[0m";
     private static final String RED = "\u001B[31m";
@@ -56,7 +65,7 @@ public class Logger {
                 }
             }
         } catch (Exception e) {
-            warn("Failed to read version from build.gradle.kts: " + e.getMessage());
+            System.err.println("Failed to read version from build.gradle.kts: " + e.getMessage());
         }
 
         return "1.0.0";
@@ -211,66 +220,161 @@ public class Logger {
         log(getLogIcon("error"), RED, message, t);
     }
 
+    public static void error(String message, Throwable t, Object... args) {
+        log(getLogIcon("error"), RED, format(message, args), t);
+    }
+
     public static void debug(String message, Object... args) {
-        log(getLogIcon("debug"), PURPLE, format(message, args));
+        if (DEBUG_MODE) {
+            log(getLogIcon("debug"), PURPLE, format(message, args));
+        }
     }
 
     public static void debug(String message, Throwable t) {
-        log(getLogIcon("debug"), PURPLE, message, t);
+        if (DEBUG_MODE) {
+            log(getLogIcon("debug"), PURPLE, message, t);
+        }
     }
 
     private static void log(String icon, String color, String message) {
-        if (IS_WINDOWS) {
+        synchronized (Logger.class) {
+            String logLine;
             String timestamp = LocalTime.now().format(TIME_FORMAT);
+            if (IS_WINDOWS) {
+                logLine = String.format("[%s] %s %s", timestamp, "[INFO]", message);
+            } else {
+                logLine = String.format(
+                        "%s%s%s %s%s%s %s%s%s",
+                        DIM, timestamp, RESET,
+                        BOLD, color, icon, RESET,
+                        BRIGHT_WHITE, message
+                );
+            }
 
-            System.out.printf("[%s] %s %s%n", timestamp, "[INFO]", message);
-            return;
+            if (LINE_READER != null) {
+                LINE_READER.printAbove(logLine);
+            } else if (TERMINAL != null) {
+                TERMINAL.writer().println(logLine);
+                TERMINAL.writer().flush();
+            } else {
+                System.out.println(logLine);
+            }
         }
-
-        String timestamp = LocalTime.now().format(TIME_FORMAT);
-        System.out.printf(
-                "%s%s%s %s%s%s %s%s%s%n",
-                DIM, timestamp, RESET,
-                BOLD, color, icon, RESET,
-                BRIGHT_WHITE, message
-        );
     }
 
     private static void log(String icon, String color, String message, Throwable t) {
-        if (IS_WINDOWS) {
-            log(icon, color, message);
-            if (t != null) {
-                System.out.println("    Exception: " + t.getClass().getSimpleName() + ": " + t.getMessage());
-            }
-
-            return;
-        }
-
-        log(icon, color, message);
-        if (t != null) {
-            System.out.println(DIM + "  ┌─ " + t.getClass().getSimpleName() + ": " +
-                    BRIGHT_RED + t.getMessage() + RESET);
-
-            StackTraceElement[] elements = t.getStackTrace();
-            int linesToShow = Math.min(elements.length, 3);
-
-            for (int i = 0; i < linesToShow; i++) {
-                StackTraceElement element = elements[i];
-                String className = element.getClassName();
-                String methodName = element.getMethodName();
-                int lineNumber = element.getLineNumber();
-
-                String shortClassName = className.substring(className.lastIndexOf('.') + 1);
-
-                System.out.println(DIM + "  │  at " + shortClassName + "." +
-                        methodName + "(" + lineNumber + ")" + RESET);
-            }
-
-            if (elements.length > linesToShow) {
-                System.out.println(DIM + "  └─ ... " + (elements.length - linesToShow) +
-                        " more" + RESET);
+        synchronized (Logger.class) {
+            String logLine;
+            String timestamp = LocalTime.now().format(TIME_FORMAT);
+            if (IS_WINDOWS) {
+                logLine = String.format("[%s] %s %s", timestamp, "[ERROR]", message);
             } else {
-                System.out.println(DIM + "  └─" + RESET);
+                logLine = String.format(
+                        "%s%s%s %s%s%s %s%s%s",
+                        DIM, timestamp, RESET,
+                        BOLD, color, icon, RESET,
+                        BRIGHT_WHITE, message
+                );
+            }
+
+            if (LINE_READER != null) {
+                LINE_READER.printAbove(logLine);
+
+                if (t != null) {
+                    if (IS_WINDOWS) {
+                        LINE_READER.printAbove("    Exception: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+                    } else {
+                        LINE_READER.printAbove(DIM + "  ┌─ " + t.getClass().getSimpleName() + ": " +
+                                BRIGHT_RED + t.getMessage() + RESET);
+
+                        StackTraceElement[] elements = t.getStackTrace();
+                        int linesToShow = Math.min(elements.length, 3);
+
+                        for (int i = 0; i < linesToShow; i++) {
+                            StackTraceElement element = elements[i];
+                            String className = element.getClassName();
+                            String methodName = element.getMethodName();
+                            int lineNumber = element.getLineNumber();
+
+                            String shortClassName = className.substring(className.lastIndexOf('.') + 1);
+
+                            LINE_READER.printAbove(DIM + "  │  at " + shortClassName + "." +
+                                    methodName + "(" + lineNumber + ")" + RESET);
+                        }
+
+                        if (elements.length > linesToShow) {
+                            LINE_READER.printAbove(DIM + "  └─ ... " + (elements.length - linesToShow) +
+                                    " more" + RESET);
+                        } else {
+                            LINE_READER.printAbove(DIM + "  └─" + RESET);
+                        }
+                    }
+                }
+            } else if (TERMINAL != null) {
+                TERMINAL.writer().println(logLine);
+                if (t != null) {
+                    if (IS_WINDOWS) {
+                        TERMINAL.writer().println("    Exception: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+                    } else {
+                        TERMINAL.writer().println(DIM + "  ┌─ " + t.getClass().getSimpleName() + ": " +
+                                BRIGHT_RED + t.getMessage() + RESET);
+
+                        StackTraceElement[] elements = t.getStackTrace();
+                        int linesToShow = Math.min(elements.length, 3);
+
+                        for (int i = 0; i < linesToShow; i++) {
+                            StackTraceElement element = elements[i];
+                            String className = element.getClassName();
+                            String methodName = element.getMethodName();
+                            int lineNumber = element.getLineNumber();
+
+                            String shortClassName = className.substring(className.lastIndexOf('.') + 1);
+
+                            TERMINAL.writer().println(DIM + "  │  at " + shortClassName + "." +
+                                    methodName + "(" + lineNumber + ")" + RESET);
+                        }
+
+                        if (elements.length > linesToShow) {
+                            TERMINAL.writer().println(DIM + "  └─ ... " + (elements.length - linesToShow) +
+                                    " more" + RESET);
+                        } else {
+                            TERMINAL.writer().println(DIM + "  └─" + RESET);
+                        }
+                    }
+                }
+                TERMINAL.writer().flush();
+            } else {
+                System.out.println(logLine);
+                if (t != null) {
+                    if (IS_WINDOWS) {
+                        System.out.println("    Exception: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+                    } else {
+                        System.out.println(DIM + "  ┌─ " + t.getClass().getSimpleName() + ": " +
+                                BRIGHT_RED + t.getMessage() + RESET);
+
+                        StackTraceElement[] elements = t.getStackTrace();
+                        int linesToShow = Math.min(elements.length, 3);
+
+                        for (int i = 0; i < linesToShow; i++) {
+                            StackTraceElement element = elements[i];
+                            String className = element.getClassName();
+                            String methodName = element.getMethodName();
+                            int lineNumber = element.getLineNumber();
+
+                            String shortClassName = className.substring(className.lastIndexOf('.') + 1);
+
+                            System.out.println(DIM + "  │  at " + shortClassName + "." +
+                                    methodName + "(" + lineNumber + ")" + RESET);
+                        }
+
+                        if (elements.length > linesToShow) {
+                            System.out.println(DIM + "  └─ ... " + (elements.length - linesToShow) +
+                                    " more" + RESET);
+                        } else {
+                            System.out.println(DIM + "  └─" + RESET);
+                        }
+                    }
+                }
             }
         }
     }
@@ -310,5 +414,17 @@ public class Logger {
         if (visibleLength >= length) return s;
 
         return s + " ".repeat(length - visibleLength);
+    }
+
+    public static void setDebugMode(boolean debugMode) {
+        DEBUG_MODE = debugMode;
+    }
+
+    public static void setTerminal(Terminal terminal) {
+        TERMINAL = terminal;
+    }
+
+    public static void setLineReader(LineReader lineReader) {
+        LINE_READER = lineReader;
     }
 }

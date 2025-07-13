@@ -1,17 +1,140 @@
 package be.esmay.atlas.base.scaler;
 
-public class ScalerManager {
+import be.esmay.atlas.base.AtlasBase;
+import be.esmay.atlas.base.config.impl.ScalerConfig;
+import be.esmay.atlas.base.utils.Logger;
+import lombok.Getter;
+import org.apache.commons.io.FileUtils;
 
-    public ScalerManager() {
+import java.io.File;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
-    }
+@Getter
+public final class ScalerManager {
+
+    private final Set<Scaler> scalers = new HashSet<>();
+
+    private ScheduledExecutorService scheduledExecutor;
+    private ScheduledFuture<?> scalingTask;
+
+    private volatile boolean isShuttingDown = false;
 
     public void initialize() {
+        this.loadScalers();
+        this.startScalingTask();
+    }
 
+    private void loadScalers() {
+        this.scalers.clear();
+
+        File groupsFolder = new File(System.getProperty("user.dir"), "groups");
+        if (!groupsFolder.exists()) {
+            groupsFolder.mkdirs();
+        }
+
+        Collection<File> groupFiles = FileUtils.listFiles(groupsFolder, new String[]{"yml"}, true).stream()
+                .filter(file -> !file.getName().startsWith("_"))
+                .toList();
+
+        for (File file : groupFiles) {
+            ScalerConfig scalerConfig = new ScalerConfig(file.getParentFile(), file.getName());
+
+            String type = scalerConfig.getGroup().getScaling().getType();
+            if (type == null) {
+                Logger.error("No scaling type defined in group file " + file.getName());
+                continue;
+            }
+
+            Scaler scaler = ScalerRegistry.get(type, scalerConfig.getGroup().getDisplayName(), scalerConfig);
+            if (scaler == null) {
+                Logger.error("Failed to create scaler for type " + type + " in group file " + file.getName());
+                continue;
+            }
+
+            this.scalers.add(scaler);
+            Logger.info("Loaded scaler {} with type {}", scaler.getGroupName(), type);
+        }
+    }
+
+    private void startScalingTask() {
+        int checkInterval = AtlasBase.getInstance().getConfigManager().getAtlasConfig().getAtlas().getScaling().getCheckInterval();
+
+        this.scheduledExecutor = new ScheduledThreadPoolExecutor(1, r -> {
+            Thread thread = new Thread(r, "Atlas-Scaler");
+            thread.setDaemon(true);
+            return thread;
+        });
+
+        Logger.info("Starting scaling task with interval: {} seconds", checkInterval);
+
+        this.scalingTask = this.scheduledExecutor.scheduleWithFixedDelay(
+                this::performScalingCheck,
+                checkInterval,
+                checkInterval,
+                TimeUnit.SECONDS
+        );
+    }
+
+    private void performScalingCheck() {
+        if (this.isShuttingDown) {
+            return;
+        }
+
+        try {
+            Logger.debug("Performing scaling check for {} scalers", this.scalers.size());
+
+            for (Scaler scaler : this.scalers) {
+                if (this.isShuttingDown) {
+                    break;
+                }
+
+                try {
+                    Logger.debug(scaler.getScalingStatus());
+                    scaler.scaleServers();
+                } catch (Exception e) {
+                    Logger.error("Error during scaling check for group: {}", scaler.getGroupName(), e);
+                }
+            }
+        } catch (Exception e) {
+            Logger.error("Unexpected error during scaling check", e);
+        }
     }
 
     public void shutdown() {
+        Logger.info("Shutting down ScalerManager");
+        this.isShuttingDown = true;
 
+        if (this.scalingTask != null) {
+            this.scalingTask.cancel(false);
+        }
+
+        if (this.scheduledExecutor != null) {
+            this.scheduledExecutor.shutdown();
+            try {
+                if (!this.scheduledExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    this.scheduledExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                this.scheduledExecutor.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
+
+        for (Scaler scaler : this.scalers) {
+            try {
+                scaler.shutdown();
+            } catch (Exception e) {
+                Logger.error("Error shutting down scaler for group: {}", scaler.getGroupName(), e);
+            }
+        }
+
+        this.scalers.clear();
     }
 
 }

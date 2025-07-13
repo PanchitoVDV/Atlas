@@ -9,17 +9,15 @@ group:
       naming-pattern: "lobby-{id}"
     min-servers: 2
     max-servers: 10
-    max-players-per-server: 50
 
   scaling:
-    type: "player-count" # player-count, group-player, peak-time
+    type: "normal"
     conditions:
       scale-up-threshold: 0.8 # 80% capacity
       scale-down-threshold: 0.3 # 30% capacity
-      min-empty-servers: 1
 
   templates:
-    - "global/lobby"
+    - "global/server"
     - "lobby/default"
 
   service-provider:

@@ -2,11 +2,12 @@ package be.esmay.atlas.base;
 
 import be.esmay.atlas.base.commands.CommandManager;
 import be.esmay.atlas.base.config.ConfigManager;
+import be.esmay.atlas.base.provider.ProviderManager;
 import be.esmay.atlas.base.scaler.ScalerManager;
 import be.esmay.atlas.base.utils.Logger;
-import be.esmay.atlas.common.utils.TimeEntry;
 import lombok.Getter;
 
+import java.io.File;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -22,10 +23,13 @@ public final class AtlasBase {
 
     private final ExecutorService executorService;
     private final ConfigManager configManager;
+    private final ProviderManager providerManager;
     private final ScalerManager scalerManager;
     private final CommandManager commandManager;
 
     private volatile boolean running = false;
+    private volatile boolean debugMode = false;
+
     private final Object shutdownLock = new Object();
     private final CountDownLatch shutdownLatch = new CountDownLatch(1);
 
@@ -34,8 +38,9 @@ public final class AtlasBase {
 
         this.executorService = Executors.newVirtualThreadPerTaskExecutor();
         this.configManager = new ConfigManager();
+        this.providerManager = new ProviderManager();
         this.scalerManager = new ScalerManager();
-        this.commandManager = new CommandManager(this);
+        this.commandManager = new CommandManager();
 
         Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown, "Atlas-Shutdown"));
     }
@@ -51,7 +56,9 @@ public final class AtlasBase {
                 Logger.printBanner();
                 Logger.info("Starting Atlas...");
 
+                this.createRequiredDirectories();
                 this.configManager.initialize();
+                this.providerManager.initialize(this.configManager.getAtlasConfig());
                 this.scalerManager.initialize();
                 this.commandManager.initialize();
 
@@ -82,6 +89,9 @@ public final class AtlasBase {
                 if (this.commandManager != null)
                     this.commandManager.shutdown();
 
+                if (this.providerManager != null)
+                    this.providerManager.shutdown();
+
                 Logger.info("Atlas has been stopped successfully.");
             } catch (Exception e) {
                 Logger.error("Error during Atlas shutdown", e);
@@ -106,6 +116,23 @@ public final class AtlasBase {
         }
     }
 
+    private void createRequiredDirectories() {
+        File serversDir = new File("servers");
+        File templatesGlobalServerDir = new File("templates/global/server");
+        File templatesGlobalProxyDir = new File("templates/global/proxy");
+
+        this.createDirectory(serversDir, "servers");
+        this.createDirectory(templatesGlobalServerDir, "templates/global/server");
+        this.createDirectory(templatesGlobalProxyDir, "templates/global/proxy");
+    }
+
+    private void createDirectory(File directory, String name) {
+        if (directory.exists()) return;
+
+        if (!directory.mkdirs())
+            Logger.warn("Failed to create {} directory: {}", name, directory.getAbsolutePath());
+    }
+
     public CompletableFuture<Void> runAsync(Runnable task) {
         return CompletableFuture.runAsync(task, this.executorService);
     }
@@ -114,9 +141,24 @@ public final class AtlasBase {
         return CompletableFuture.supplyAsync(supplier, this.executorService);
     }
 
+    public void setDebugMode(boolean debugMode) {
+        this.debugMode = debugMode;
+
+        Logger.setDebugMode(debugMode);
+        Logger.info("Debug mode {}", debugMode ? "enabled" : "disabled");
+    }
+
     public static void main(String[] args) {
         try {
             AtlasBase atlasBase = new AtlasBase();
+
+            for (String arg : args) {
+                if (arg.equals("--debug")) {
+                    atlasBase.setDebugMode(true);
+                    break;
+                }
+            }
+
             atlasBase.start();
 
             atlasBase.shutdownLatch.await();

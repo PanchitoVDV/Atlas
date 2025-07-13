@@ -7,6 +7,8 @@ dependencies {
     implementation("ch.qos.logback:logback-classic:1.4.11")
 
     implementation("com.github.docker-java:docker-java:3.5.1")
+    implementation("org.jline:jline-terminal:3.21.0")
+    implementation("org.jline:jline-reader:3.21.0")
 }
 
 tasks.withType<Jar> {

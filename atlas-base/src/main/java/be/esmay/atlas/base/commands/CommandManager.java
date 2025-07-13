@@ -1,20 +1,23 @@
 package be.esmay.atlas.base.commands;
 
-import be.esmay.atlas.base.AtlasBase;
+import be.esmay.atlas.base.commands.impl.DebugCommand;
 import be.esmay.atlas.base.commands.impl.StopCommand;
 import be.esmay.atlas.base.utils.Logger;
-import lombok.RequiredArgsConstructor;
+import org.jline.reader.LineReader;
+import org.jline.reader.LineReaderBuilder;
+import org.jline.reader.impl.DefaultParser;
+import org.jline.terminal.Terminal;
+import org.jline.terminal.TerminalBuilder;
 
+import java.io.IOException;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Scanner;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
-@RequiredArgsConstructor
 public final class CommandManager {
 
     private static final String RESET = "\u001B[0m";
@@ -28,21 +31,42 @@ public final class CommandManager {
 
     private static final boolean IS_WINDOWS =
             System.getProperty("os.name").toLowerCase().contains("win");
-
-    private final AtlasBase atlasBase;
     private final Map<String, AtlasCommand> commands = new ConcurrentHashMap<>();
     private final Map<String, AtlasCommand> primaryCommands = new LinkedHashMap<>();
     private volatile boolean running = false;
     private Thread commandThread;
-    private Scanner scanner;
+    private volatile boolean waitingForInput = false;
+    private Terminal terminal;
+    private LineReader lineReader;
 
     public void initialize() {
         Logger.info("Enabling command manager...");
 
-        this.registerCommand(new StopCommand(this.atlasBase));
+        this.registerCommand(new StopCommand());
+        this.registerCommand(new DebugCommand());
+
+        try {
+            this.terminal = TerminalBuilder.builder()
+                    .system(true)
+                    .build();
+
+            this.lineReader = LineReaderBuilder.builder()
+                    .terminal(this.terminal)
+                    .parser(new DefaultParser())
+                    .variable(LineReader.SECONDARY_PROMPT_PATTERN, "")
+                    .variable(LineReader.INDENTATION, 0)
+                    .option(LineReader.Option.DISABLE_EVENT_EXPANSION, true)
+                    .build();
+
+            Logger.setTerminal(this.terminal);
+            Logger.setLineReader(this.lineReader);
+        } catch (IOException e) {
+            Logger.error("Failed to initialize terminal", e);
+            return;
+        }
 
         this.running = true;
-        this.scanner = new Scanner(System.in);
+
         this.commandThread = new Thread(this::handleInput, "Atlas-Commands");
         this.commandThread.setDaemon(true);
         this.commandThread.start();
@@ -51,8 +75,12 @@ public final class CommandManager {
     public void shutdown() {
         this.running = false;
 
-        if (this.scanner != null) {
-            this.scanner.close();
+        if (this.terminal != null) {
+            try {
+                this.terminal.close();
+            } catch (IOException e) {
+                Logger.error("Error closing terminal", e);
+            }
         }
 
         if (this.commandThread != null && !this.commandThread.isInterrupted()) {
@@ -76,18 +104,21 @@ public final class CommandManager {
     private void handleInput() {
         while (this.running && !Thread.currentThread().isInterrupted()) {
             try {
-                this.printPrompt();
+                this.waitingForInput = true;
 
-                if (!this.scanner.hasNextLine())
+                String input = this.lineReader.readLine(this.getPromptString());
+                this.waitingForInput = false;
+
+                if (input == null)
                     break;
 
-                String input = this.scanner.nextLine().trim();
-
+                input = input.trim();
                 if (input.isEmpty())
                     continue;
 
                 this.processCommand(input);
             } catch (Exception e) {
+                this.waitingForInput = false;
                 if (!Thread.currentThread().isInterrupted())
                     Logger.error("Command handling error", e);
 
@@ -96,14 +127,13 @@ public final class CommandManager {
         }
     }
 
-    private void printPrompt() {
+    private String getPromptString() {
         if (IS_WINDOWS) {
-            System.out.print("Atlas> ");
-            return;
+            return "Atlas> ";
         }
-
-        System.out.print(BRIGHT_CYAN + BOLD + "Atlas" + RESET + DIM + " › " + RESET);
+        return BRIGHT_CYAN + BOLD + "Atlas" + RESET + DIM + " › " + RESET;
     }
+
 
     private void processCommand(String input) {
         String[] parts = input.split("\\s+", 2);
@@ -114,6 +144,7 @@ public final class CommandManager {
             this.showHelp(args);
             return;
         }
+
 
         AtlasCommand command = this.commands.get(commandName);
         if (command == null) {
@@ -274,4 +305,5 @@ public final class CommandManager {
     public int getCommandCount() {
         return this.primaryCommands.size();
     }
+
 }

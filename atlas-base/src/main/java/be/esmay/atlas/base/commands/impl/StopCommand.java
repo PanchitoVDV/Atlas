@@ -7,10 +7,7 @@ import lombok.RequiredArgsConstructor;
 
 import java.util.List;
 
-@RequiredArgsConstructor
 public final class StopCommand implements AtlasCommand {
-
-    private final AtlasBase atlasBase;
 
     @Override
     public String getName() {
@@ -30,7 +27,7 @@ public final class StopCommand implements AtlasCommand {
     @Override
     public void execute(String[] args) {
         Logger.info("Shutting down Atlas...");
-        this.atlasBase.shutdown();
+        AtlasBase.getInstance().shutdown();
         System.exit(0);
     }
 

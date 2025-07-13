@@ -2,6 +2,7 @@ package be.esmay.atlas.base.config.impl;
 
 import be.esmay.atlas.base.config.ConfigurateConfig;
 import lombok.Data;
+import lombok.Getter;
 import org.spongepowered.configurate.objectmapping.ConfigSerializable;
 import org.spongepowered.configurate.objectmapping.meta.Setting;
 
@@ -9,12 +10,15 @@ import java.io.File;
 import java.util.List;
 import java.util.Map;
 
+@Getter
 public final class ScalerConfig extends ConfigurateConfig {
+
+    private final Group group;
 
     public ScalerConfig(File file, String fileName) {
         super(file, fileName);
 
-        this.loadOrCreateConfig("group", Group.class);
+        this.group = this.loadOrCreateConfig("group", Group.class);
     }
 
     @Data
@@ -63,7 +67,7 @@ public final class ScalerConfig extends ConfigurateConfig {
         @Setting("identifier")
         private String identifier;
 
-        @Setting("name-pattern")
+        @Setting("naming-pattern")
         private String namePattern;
 
     }
@@ -87,9 +91,6 @@ public final class ScalerConfig extends ConfigurateConfig {
 
         @Setting("scale-down-threshold")
         private double scaleDownThreshold;
-
-        @Setting("min-empty-servers")
-        private int minEmptyServers;
 
     }
 
