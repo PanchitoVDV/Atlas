@@ -30,6 +30,8 @@ public final class ScalerConfig extends ConfigurateConfig {
         @Setting("display-name")
         private String displayName;
 
+        private int priority = 0;
+
         private Server server;
 
         private Scaling scaling;

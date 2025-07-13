@@ -2,6 +2,7 @@ package be.esmay.atlas.base.scaler;
 
 import be.esmay.atlas.base.config.impl.ScalerConfig;
 import be.esmay.atlas.base.scaler.impl.NormalScaler;
+import be.esmay.atlas.base.scaler.impl.ProxyScaler;
 import be.esmay.atlas.base.utils.Logger;
 
 import java.util.HashMap;
@@ -13,6 +14,7 @@ public final class ScalerRegistry {
 
     static {
         SCALERS.put("NORMAL", NormalScaler.class);
+        SCALERS.put("PROXY", ProxyScaler.class);
     }
 
     public static void registerScaler(String actionKey, Class<? extends Scaler> scalerClass) {

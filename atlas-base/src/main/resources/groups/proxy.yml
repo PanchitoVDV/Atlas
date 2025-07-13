@@ -1,0 +1,31 @@
+group:
+  name: "proxy"
+  display-name: "Velocity Proxies"
+  priority: 0
+
+  server:
+    type: "dynamic" # Proxies are typically dynamic
+    naming:
+      identifier: "numeric" # Use numeric IDs for proxies
+      naming-pattern: "proxy-{id}"
+    min-servers: 1 # Always maintain at least 1 proxy for network availability
+    max-servers: 3 # Maximum number of proxy instances
+
+  scaling:
+    type: "proxy" # Uses ProxyScaler for network-wide scaling decisions
+    conditions:
+      scale-up-threshold: 0.75 # Scale up when 75% of total proxy network capacity is used
+      scale-down-threshold: 0.25 # Scale down when below 25% utilization
+
+  templates:
+    - "global/proxy"
+
+  service-provider:
+    docker:
+      image: "itzg/mc-proxy:latest" # Docker image for Minecraft proxy (supports Velocity, BungeeCord, etc.)
+      memory: "1G"
+      cpu: "0.5"
+      environment:
+        TYPE: "VELOCITY" # Use Velocity as the proxy type
+        MEMORY: "768M"
+        EULA: "TRUE"

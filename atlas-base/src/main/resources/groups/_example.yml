@@ -1,6 +1,7 @@
 group:
   name: "lobby"
   display-name: "Lobby Servers"
+  priority: 0
 
   server:
     type: "dynamic" # or static

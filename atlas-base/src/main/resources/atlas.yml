@@ -27,9 +27,3 @@ atlas:
   scaling:
     check-interval: 5 # seconds
     cooldown: 30 # seconds between scaling actions
-
-  proxy:
-    auto-manage: true
-    min-instances: 1
-    max-instances: 3
-    naming-pattern: "proxy-{id}"

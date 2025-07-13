@@ -3,13 +3,16 @@ package be.esmay.atlas.base.scaler;
 import be.esmay.atlas.base.AtlasBase;
 import be.esmay.atlas.base.config.impl.ScalerConfig;
 import be.esmay.atlas.base.provider.ServiceProvider;
+import be.esmay.atlas.base.scaler.impl.ProxyScaler;
 import be.esmay.atlas.base.utils.Logger;
 import lombok.Getter;
 import org.apache.commons.io.FileUtils;
 
 import java.io.File;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -108,7 +111,12 @@ public final class ScalerManager {
         try {
             Logger.debug("Performing scaling check for {} scalers", this.scalers.size());
 
-            for (Scaler scaler : this.scalers) {
+            List<Scaler> sortedScalers = this.scalers.stream()
+                    .sorted(Comparator.comparing((Scaler scaler) -> !(scaler instanceof ProxyScaler))
+                            .thenComparingInt(scaler -> scaler.getScalerConfig().getGroup().getPriority()))
+                    .toList();
+
+            for (Scaler scaler : sortedScalers) {
                 if (this.isShuttingDown) {
                     break;
                 }
