@@ -1,6 +1,11 @@
 package be.esmay.atlas.base.commands;
 
+import be.esmay.atlas.base.commands.impl.ConfigCommand;
 import be.esmay.atlas.base.commands.impl.DebugCommand;
+import be.esmay.atlas.base.commands.impl.GroupsCommand;
+import be.esmay.atlas.base.commands.impl.MetricsCommand;
+import be.esmay.atlas.base.commands.impl.ScalingCommand;
+import be.esmay.atlas.base.commands.impl.ServersCommand;
 import be.esmay.atlas.base.commands.impl.StopCommand;
 import be.esmay.atlas.base.utils.Logger;
 import org.jline.reader.LineReader;
@@ -44,6 +49,11 @@ public final class CommandManager {
 
         this.registerCommand(new StopCommand());
         this.registerCommand(new DebugCommand());
+        this.registerCommand(new ServersCommand());
+        this.registerCommand(new GroupsCommand());
+        this.registerCommand(new ScalingCommand());
+        this.registerCommand(new MetricsCommand());
+        this.registerCommand(new ConfigCommand());
 
         try {
             this.terminal = TerminalBuilder.builder()

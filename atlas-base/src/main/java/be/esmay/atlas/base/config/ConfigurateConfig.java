@@ -70,6 +70,14 @@ public abstract class ConfigurateConfig {
         }
     }
 
+    public void reloadConfiguration() {
+        try {
+            this.rootNode = this.loader.load();
+        } catch (IOException e) {
+            Logger.error("Error reloading configuration: " + e.getMessage());
+        }
+    }
+
     protected <T> T loadOrCreateConfig(String nodeName, Class<T> configClass) {
         try {
             T config = this.rootNode.node(nodeName).get(configClass);

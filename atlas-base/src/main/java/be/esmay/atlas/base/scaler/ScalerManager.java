@@ -106,6 +106,44 @@ public final class ScalerManager {
         }
     }
 
+    public Scaler getScaler(String groupName) {
+        Scaler exactMatch = this.scalers.stream()
+                .filter(scaler -> scaler.getGroupName().equals(groupName))
+                .findFirst()
+                .orElse(null);
+        
+        if (exactMatch != null) {
+            return exactMatch;
+        }
+
+        Scaler caseInsensitiveMatch = this.scalers.stream()
+                .filter(scaler -> scaler.getGroupName().equalsIgnoreCase(groupName))
+                .findFirst()
+                .orElse(null);
+        
+        if (caseInsensitiveMatch != null) {
+            return caseInsensitiveMatch;
+        }
+
+        return this.scalers.stream()
+                .filter(scaler -> scaler.getScalerConfig().getGroup().getName() != null && scaler.getScalerConfig().getGroup().getName().equalsIgnoreCase(groupName))
+                .findFirst()
+                .orElse(null);
+    }
+
+    public void reloadScalers() {
+        Logger.info("Reloading scaler configurations");
+        for (Scaler scaler : this.scalers) {
+            try {
+                scaler.shutdown();
+            } catch (Exception e) {
+                Logger.error("Error shutting down scaler during reload: {}", scaler.getGroupName(), e);
+            }
+        }
+        this.loadScalers();
+        Logger.info("Scaler configurations reloaded successfully");
+    }
+
     public void shutdown() {
         Logger.info("Shutting down ScalerManager");
         this.isShuttingDown = true;

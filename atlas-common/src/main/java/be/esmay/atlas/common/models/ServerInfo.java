@@ -14,6 +14,7 @@ public final class ServerInfo {
     private String serverId;
     private String name;
     private String group;
+    private String workingDirectory;
 
     private String address;
     private int port;

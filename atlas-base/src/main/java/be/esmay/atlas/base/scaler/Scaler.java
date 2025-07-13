@@ -2,10 +2,12 @@ package be.esmay.atlas.base.scaler;
 
 import be.esmay.atlas.base.AtlasBase;
 import be.esmay.atlas.base.config.impl.ScalerConfig;
+import be.esmay.atlas.base.lifecycle.ServerLifecycleManager;
 import be.esmay.atlas.base.provider.ServiceProvider;
 import be.esmay.atlas.base.utils.Logger;
 import be.esmay.atlas.common.enums.ScaleType;
 import be.esmay.atlas.common.enums.ServerStatus;
+import be.esmay.atlas.common.enums.ServerType;
 import be.esmay.atlas.common.models.ServerInfo;
 import lombok.Getter;
 
@@ -28,9 +30,11 @@ public abstract class Scaler {
     protected final String groupName;
     protected final ScalerConfig scalerConfig;
     protected final ServiceProvider serviceProvider;
+    protected final ServerLifecycleManager lifecycleManager;
     protected final Map<String, ServerInfo> servers = new ConcurrentHashMap<>();
 
     protected volatile boolean shutdown = false;
+    protected volatile boolean paused = false;
     protected volatile Instant lastScaleUpTime = Instant.MIN;
     protected volatile Instant lastScaleDownTime = Instant.MIN;
 
@@ -38,6 +42,7 @@ public abstract class Scaler {
         this.groupName = groupName;
         this.scalerConfig = scalerConfig;
         this.serviceProvider = AtlasBase.getInstance().getProviderManager().getProvider();
+        this.lifecycleManager = new ServerLifecycleManager();
     }
 
     public abstract ScaleType needsScaling();
@@ -61,6 +66,11 @@ public abstract class Scaler {
 
     public void scaleServers() {
         this.checkHeartbeats();
+
+        if (this.paused) {
+            Logger.debug("Scaling is paused for group: {}", this.groupName);
+            return;
+        }
 
         ScaleType scaleType = this.needsScaling();
 
@@ -87,21 +97,26 @@ public abstract class Scaler {
     }
 
     public CompletableFuture<Void> upscale() {
-        String identifier = this.getNextIdentifier();
-        Logger.info("Manually scaling up server: {} for group: {}", identifier, this.groupName);
+        ServerType serverType = ServerType.valueOf(this.scalerConfig.getGroup().getServer().getType().toUpperCase());
+        String serverId = this.getNextIdentifier(); // Use existing logic
+        Logger.info("Manually scaling up server: {} for group: {}", serverId, this.groupName);
 
-        CompletableFuture<ServerInfo> createFuture = this.serviceProvider.createServer(this.scalerConfig.getGroup(), identifier);
+        CompletableFuture<ServerInfo> createFuture = this.lifecycleManager.createServer(
+            this.serviceProvider, 
+            this.scalerConfig.getGroup(), 
+            serverId, 
+            serverId, 
+            serverType, 
+            true
+        );
         
         CompletableFuture<Void> acceptFuture = createFuture.thenAccept(server -> {
-            server.setManuallyScaled(true);
-            server.setStatus(ServerStatus.STARTING);
-            server.setLastHeartbeat(System.currentTimeMillis());
             this.addServer(server);
-            Logger.info("Successfully created manual server: {} (ID: {})", server.getName(), server.getServerId());
+            Logger.info("Successfully created manual server: {}", server.getName());
         });
         
         return acceptFuture.exceptionally(throwable -> {
-            Logger.error("Failed to create manual server: {}", identifier, throwable);
+            Logger.error("Failed to create manual server: {}", serverId, throwable);
             return null;
         });
     }
@@ -135,21 +150,26 @@ public abstract class Scaler {
     }
 
     private CompletableFuture<Void> createAutoScaledServer() {
-        String identifier = this.getNextIdentifier();
-        Logger.debug("Creating auto-scaled server: {} for group: {}", identifier, this.groupName);
+        ServerType serverType = ServerType.valueOf(this.scalerConfig.getGroup().getServer().getType().toUpperCase());
+        String serverId = this.getNextIdentifier(); // Use existing logic
+        Logger.debug("Creating auto-scaled server: {} for group: {}", serverId, this.groupName);
 
-        CompletableFuture<ServerInfo> createFuture = this.serviceProvider.createServer(this.scalerConfig.getGroup(), identifier);
+        CompletableFuture<ServerInfo> createFuture = this.lifecycleManager.createServer(
+            this.serviceProvider, 
+            this.scalerConfig.getGroup(), 
+            serverId, 
+            serverId, 
+            serverType, 
+            false
+        );
         
         CompletableFuture<Void> acceptFuture = createFuture.thenAccept(server -> {
-            server.setManuallyScaled(false);
-            server.setStatus(ServerStatus.STARTING);
-            server.setLastHeartbeat(System.currentTimeMillis());
             this.addServer(server);
-            Logger.info("Successfully created auto-scaled server: {} (ID: {})", server.getName(), server.getServerId());
+            Logger.info("Successfully created auto-scaled server: {}", server.getName());
         });
         
         return acceptFuture.exceptionally(throwable -> {
-            Logger.error("Failed to create auto-scaled server: {}", identifier, throwable);
+            Logger.error("Failed to create auto-scaled server: {}", serverId, throwable);
             return null;
         });
     }
@@ -170,6 +190,44 @@ public abstract class Scaler {
 
             this.remove(serverToRemove);
             this.lastScaleDownTime = Instant.now();
+        }
+    }
+
+    public void pauseScaling() {
+        this.paused = true;
+        Logger.info("Scaling paused for group: {}", this.groupName);
+    }
+
+    public void resumeScaling() {
+        this.paused = false;
+        Logger.info("Scaling resumed for group: {}", this.groupName);
+    }
+
+    public CompletableFuture<Void> triggerScaleUp() {
+        Logger.info("Triggering manual scale up for group: {}", this.groupName);
+        return this.upscale();
+    }
+
+    public CompletableFuture<Void> triggerScaleDown() {
+        Logger.info("Triggering manual scale down for group: {}", this.groupName);
+        return CompletableFuture.runAsync(this::manualScaleDown);
+    }
+
+    private void manualScaleDown() {
+        ServerInfo serverToRemove = this.servers.values().stream()
+                .filter(server -> server.getStatus() == ServerStatus.RUNNING)
+                .min(Comparator.comparingInt(ServerInfo::getOnlinePlayers)
+                        .thenComparing(ServerInfo::getCreatedAt, Comparator.reverseOrder()))
+                .orElse(null);
+
+        if (serverToRemove != null) {
+            String serverType = serverToRemove.isManuallyScaled() ? "manual" : "auto-scaled";
+            Logger.info("Manually scaling down {} server: {} (players: {}) from group: {}",
+                    serverType, serverToRemove.getName(), serverToRemove.getOnlinePlayers(), this.groupName);
+
+            this.remove(serverToRemove);
+        } else {
+            Logger.info("No running servers available to scale down in group: {}", this.groupName);
         }
     }
 
@@ -220,6 +278,15 @@ public abstract class Scaler {
 
         this.servers.remove(server.getServerId());
         this.shutdownServer(server);
+    }
+
+    private CompletableFuture<Void> shutdownServer(ServerInfo server) {
+        return AtlasBase.getInstance().getServerManager().forceDeleteServer(server)
+                .thenRun(() -> Logger.debug("Successfully removed server: {}", server.getName()))
+                .exceptionally(throwable -> {
+                    Logger.error("Failed to shutdown server: {}", server.getName(), throwable);
+                    return null;
+                });
     }
 
     public List<ServerInfo> getServers() {
@@ -392,35 +459,6 @@ public abstract class Scaler {
         return this.scalerConfig.getGroup().getServer().getMaxServers();
     }
 
-    protected CompletableFuture<Void> shutdownServer(ServerInfo server) {
-        Logger.info("Shutting down server: {} via provider", server.getName());
-
-        CompletableFuture<Boolean> stopFuture = this.serviceProvider.stopServer(server.getServerId());
-        
-        CompletableFuture<Void> result = stopFuture.thenCompose(stopped -> {
-            if (!stopped) {
-                Logger.warn("Failed to stop server: {}", server.getName());
-                return CompletableFuture.completedFuture(null);
-            }
-            
-            Logger.info("Successfully stopped server: {}", server.getName());
-            
-            CompletableFuture<Boolean> deleteFuture = this.serviceProvider.deleteServer(server.getServerId());
-            
-            return deleteFuture.thenAccept(deleted -> {
-                if (deleted) {
-                    Logger.info("Successfully deleted server: {}", server.getName());
-                } else {
-                    Logger.warn("Failed to delete server: {}", server.getName());
-                }
-            });
-        });
-        
-        return result.exceptionally(throwable -> {
-            Logger.error("Error shutting down server: {}", server.getName(), throwable);
-            return null;
-        });
-    }
 
     protected boolean isUuidIdentifier() {
         String identifier = this.scalerConfig.getGroup().getServer().getNaming().getIdentifier();

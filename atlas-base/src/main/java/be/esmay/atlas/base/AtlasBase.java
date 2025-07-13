@@ -2,8 +2,10 @@ package be.esmay.atlas.base;
 
 import be.esmay.atlas.base.commands.CommandManager;
 import be.esmay.atlas.base.config.ConfigManager;
+import be.esmay.atlas.base.lifecycle.ServerLifecycleManager;
 import be.esmay.atlas.base.provider.ProviderManager;
 import be.esmay.atlas.base.scaler.ScalerManager;
+import be.esmay.atlas.base.server.ServerManager;
 import be.esmay.atlas.base.utils.Logger;
 import lombok.Getter;
 
@@ -26,6 +28,7 @@ public final class AtlasBase {
     private final ProviderManager providerManager;
     private final ScalerManager scalerManager;
     private final CommandManager commandManager;
+    private final ServerManager serverManager;
 
     private volatile boolean running = false;
     private volatile boolean debugMode = false;
@@ -41,6 +44,7 @@ public final class AtlasBase {
         this.providerManager = new ProviderManager();
         this.scalerManager = new ScalerManager();
         this.commandManager = new CommandManager();
+        this.serverManager = new ServerManager(new ServerLifecycleManager());
 
         Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown, "Atlas-Shutdown"));
     }

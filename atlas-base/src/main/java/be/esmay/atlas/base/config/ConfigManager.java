@@ -50,4 +50,9 @@ public final class ConfigManager {
             Logger.error("Failed to copy example group configuration: " + e.getMessage());
         }
     }
+
+    public void reloadConfiguration() {
+        this.atlasConfig.reloadConfiguration();
+        this.atlasConfig = new AtlasConfig();
+    }
 }

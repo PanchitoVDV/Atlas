@@ -12,6 +12,9 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -20,8 +23,11 @@ public final class InMemoryServiceProvider extends ServiceProvider {
     private final Map<String, ServerInfo> servers;
     private final Map<String, Deque<String>> serverLogs;
     private final Map<String, Map<String, Consumer<String>>> logSubscribers;
+    private final ScheduledExecutorService heartbeatExecutor;
     private int portCounter = 25565;
+    private int instanceCounter = 1;
     private static final int MAX_LOG_LINES = 1000;
+    private static final int HEARTBEAT_INTERVAL_SECONDS = 5;
     
     public InMemoryServiceProvider(AtlasConfig.ServiceProvider serviceProviderConfig) {
         super("in-memory");
@@ -29,6 +35,14 @@ public final class InMemoryServiceProvider extends ServiceProvider {
         this.servers = new ConcurrentHashMap<>();
         this.serverLogs = new ConcurrentHashMap<>();
         this.logSubscribers = new ConcurrentHashMap<>();
+        this.heartbeatExecutor = Executors.newScheduledThreadPool(1, r -> {
+            Thread thread = new Thread(r, "InMemory-Heartbeat");
+            thread.setDaemon(true);
+            return thread;
+        });
+        
+        // Start the heartbeat system
+        this.startHeartbeatSystem();
     }
     
     /**
@@ -36,42 +50,48 @@ public final class InMemoryServiceProvider extends ServiceProvider {
      * Automatically assigns ports starting from 25565.
      */
     @Override
-    public CompletableFuture<ServerInfo> createServer(ScalerConfig.Group groupConfig, String serverName) {
+    public CompletableFuture<ServerInfo> createServer(ScalerConfig.Group groupConfig, ServerInfo serverInfo) {
         return CompletableFuture.supplyAsync(() -> {
-            String serverId = UUID.randomUUID().toString();
-            
-            ServerInfo serverInfo = ServerInfo.builder()
-                    .serverId(serverId)
-                    .name(serverName)
-                    .group(groupConfig.getName())
+            String serverId = serverInfo.getServerId();
+
+            String serviceProviderId = "inmem-server-" + (this.instanceCounter++);
+
+            ServerInfo updatedServer = ServerInfo.builder()
+                    .serverId(serverInfo.getServerId())
+                    .name(serverInfo.getName())
+                    .group(serverInfo.getGroup())
+                    .workingDirectory(serverInfo.getWorkingDirectory())
                     .address("localhost")
                     .port(portCounter++)
-                    .type(ServerType.valueOf(groupConfig.getServer().getType().toUpperCase()))
+                    .type(serverInfo.getType())
                     .status(ServerStatus.STARTING)
                     .onlinePlayers(0)
-                    .maxPlayers(0)
+                    .maxPlayers(serverInfo.getMaxPlayers())
                     .onlinePlayerNames(new HashSet<>())
-                    .createdAt(System.currentTimeMillis())
+                    .createdAt(serverInfo.getCreatedAt())
                     .lastHeartbeat(System.currentTimeMillis())
-                    .serviceProviderId(this.name)
-                    .isManuallyScaled(false)
+                    .serviceProviderId(serviceProviderId)
+                    .isManuallyScaled(serverInfo.isManuallyScaled())
                     .build();
             
-            servers.put(serverId, serverInfo);
-            serverLogs.put(serverId, new ConcurrentLinkedDeque<>());
-            logSubscribers.put(serverId, new ConcurrentHashMap<>());
+            this.servers.put(serverId, updatedServer);
+            this.serverLogs.put(serverId, new ConcurrentLinkedDeque<>());
+            this.logSubscribers.put(serverId, new ConcurrentHashMap<>());
             
-            addLog(serverId, "Server created: " + serverName);
-            Logger.info("Created in-memory server: {} (ID: {})", serverName, serverId);
+            this.addLog(serverId, "Server created: " + serverInfo.getName());
+            this.addLog(serverId, "Working directory: " + serverInfo.getWorkingDirectory());
+            this.addLog(serverId, "Service provider instance: " + serviceProviderId);
+            Logger.info("Created in-memory server: {} (ID: {}, Instance: {})", serverInfo.getName(), serverId, serviceProviderId);
             
             CompletableFuture.delayedExecutor(2, java.util.concurrent.TimeUnit.SECONDS).execute(() -> {
-                serverInfo.setStatus(ServerStatus.RUNNING);
-                serverInfo.setLastHeartbeat(System.currentTimeMillis());
-                addLog(serverId, "Server started successfully");
-                Logger.info("Server {} is now running", serverName);
+                updatedServer.setStatus(ServerStatus.RUNNING);
+                updatedServer.setLastHeartbeat(System.currentTimeMillis());
+                this.addLog(serverId, "Server started successfully - max players: " + updatedServer.getMaxPlayers());
+                this.addLog(serverId, "Listening on " + updatedServer.getAddress() + ":" + updatedServer.getPort());
+                Logger.info("Server {} is now running with capacity for {} players", serverInfo.getName(), updatedServer.getMaxPlayers());
             });
             
-            return serverInfo;
+            return updatedServer;
         });
     }
     
@@ -79,28 +99,31 @@ public final class InMemoryServiceProvider extends ServiceProvider {
      * Starts a stopped server with a 2-second simulated startup delay.
      */
     @Override
-    public CompletableFuture<Boolean> startServer(String serverId) {
-        return CompletableFuture.supplyAsync(() -> {
-            ServerInfo server = servers.get(serverId);
+    public CompletableFuture<Void> startServer(ServerInfo serverInfo) {
+        return CompletableFuture.runAsync(() -> {
+            String serverId = serverInfo.getServerId();
+            ServerInfo server = this.servers.get(serverId);
             if (server == null) {
                 Logger.warn("Server not found: {}", serverId);
-                return false;
+                return;
             }
             
             if (server.getStatus() == ServerStatus.RUNNING) {
                 Logger.warn("Server already running: {}", serverId);
-                return false;
+                return;
             }
             
             server.setStatus(ServerStatus.STARTING);
+            this.addLog(serverId, "Starting server...");
             
             CompletableFuture.delayedExecutor(2, java.util.concurrent.TimeUnit.SECONDS).execute(() -> {
                 server.setStatus(ServerStatus.RUNNING);
                 server.setLastHeartbeat(System.currentTimeMillis());
+                
+                this.addLog(serverId, "Server startup completed - ready for players");
+                this.addLog(serverId, "Working directory: " + server.getWorkingDirectory());
                 Logger.info("Started server: {}", server.getName());
             });
-            
-            return true;
         });
     }
     
@@ -109,24 +132,25 @@ public final class InMemoryServiceProvider extends ServiceProvider {
      * Clears player data when stopped.
      */
     @Override
-    public CompletableFuture<Boolean> stopServer(String serverId) {
-        return CompletableFuture.supplyAsync(() -> {
-            ServerInfo server = servers.get(serverId);
+    public CompletableFuture<Void> stopServer(ServerInfo serverInfo) {
+        return CompletableFuture.runAsync(() -> {
+            String serverId = serverInfo.getServerId();
+            ServerInfo server = this.servers.get(serverId);
             if (server == null) {
                 Logger.warn("Server not found: {}", serverId);
-                return false;
+                return;
             }
             
             server.setStatus(ServerStatus.STOPPING);
+            this.addLog(serverId, "Stopping server...");
             
             CompletableFuture.delayedExecutor(1, java.util.concurrent.TimeUnit.SECONDS).execute(() -> {
                 server.setStatus(ServerStatus.STOPPED);
                 server.setOnlinePlayers(0);
                 server.setOnlinePlayerNames(new HashSet<>());
-                Logger.info("Stopped server: {}", server.getName());
+                this.addLog(serverId, "Server stopped");
+                Logger.debug("Stopped server: {}", server.getName());
             });
-            
-            return true;
         });
     }
     
@@ -283,6 +307,98 @@ public final class InMemoryServiceProvider extends ServiceProvider {
                     }
                 });
             }
+        }
+    }
+    
+    /**
+     * Starts the heartbeat system that simulates servers sending regular heartbeats
+     * and occasionally simulates player activity.
+     */
+    private void startHeartbeatSystem() {
+        this.heartbeatExecutor.scheduleWithFixedDelay(() -> {
+            try {
+                this.sendHeartbeats();
+            } catch (Exception e) {
+                Logger.error("Error in heartbeat system: {}", e.getMessage());
+            }
+        }, HEARTBEAT_INTERVAL_SECONDS, HEARTBEAT_INTERVAL_SECONDS, TimeUnit.SECONDS);
+        
+        Logger.info("Started heartbeat system with {}s interval", HEARTBEAT_INTERVAL_SECONDS);
+    }
+    
+    /**
+     * Sends heartbeats for all running servers and simulates player activity.
+     */
+    private void sendHeartbeats() {
+        for (ServerInfo server : this.servers.values()) {
+            if (server.getStatus() == ServerStatus.RUNNING) {
+                server.setLastHeartbeat(System.currentTimeMillis());
+
+                if (Math.random() < 0.2) {
+                    this.simulatePlayerActivity(server);
+                }
+
+                if (Math.random() < 0.1) {
+                    this.addLog(server.getServerId(), "Heartbeat sent - Server healthy");
+                }
+            }
+        }
+    }
+    
+    /**
+     * Simulates random player activity (joins/leaves) to make the server feel alive.
+     */
+    private void simulatePlayerActivity(ServerInfo server) {
+        Random random = new Random();
+        Set<String> playerNames = new HashSet<>(server.getOnlinePlayerNames());
+
+        if (server.getMaxPlayers() == 0) {
+            server.setMaxPlayers(20 + random.nextInt(81));
+        }
+
+        if (random.nextBoolean() && random.nextBoolean() && random.nextBoolean()) {
+            if (playerNames.size() < server.getMaxPlayers() && (playerNames.isEmpty() || random.nextBoolean())) {
+                String playerName = "Player" + (1000 + random.nextInt(9000));
+                if (playerNames.add(playerName)) {
+                    server.setOnlinePlayerNames(playerNames);
+                    server.setOnlinePlayers(playerNames.size());
+                    this.addLog(server.getServerId(), "Player " + playerName + " joined the server");
+                }
+            } else if (!playerNames.isEmpty()) {
+                String playerName = playerNames.iterator().next();
+                if (playerNames.remove(playerName)) {
+                    server.setOnlinePlayerNames(playerNames);
+                    server.setOnlinePlayers(playerNames.size());
+                    this.addLog(server.getServerId(), "Player " + playerName + " left the server");
+                }
+            }
+        }
+
+        if (random.nextDouble() < 0.05) {
+            String[] activities = {
+                "Server tick completed (TPS: " + (18.5 + random.nextDouble() * 1.5) + ")",
+                "Garbage collection completed in " + (10 + random.nextInt(50)) + "ms",
+                "Chunk loaded at " + random.nextInt(1000) + ", " + random.nextInt(1000),
+                "Auto-save completed",
+                "Memory usage: " + (40 + random.nextInt(40)) + "%"
+            };
+            this.addLog(server.getServerId(), activities[random.nextInt(activities.length)]);
+        }
+    }
+    
+    /**
+     * Shuts down the heartbeat system when the provider is no longer needed.
+     */
+    public void shutdown() {
+        Logger.info("Shutting down InMemoryServiceProvider heartbeat system");
+        this.heartbeatExecutor.shutdown();
+        try {
+            if (!this.heartbeatExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                this.heartbeatExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            this.heartbeatExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
         }
     }
 }

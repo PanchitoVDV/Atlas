@@ -3,12 +3,13 @@ package be.esmay.atlas.base.provider;
 import be.esmay.atlas.common.models.ServerInfo;
 import be.esmay.atlas.base.config.impl.ScalerConfig;
 import lombok.Data;
+import lombok.Getter;
 
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
-@Data
+@Getter
 public abstract class ServiceProvider {
     
     protected final String name;
@@ -16,31 +17,31 @@ public abstract class ServiceProvider {
     protected ServiceProvider(String name) {
         this.name = name;
     }
-    
+
     /**
-     * Creates a new server instance based on the provided group configuration.
+     * Creates a new server instance based on the provided group configuration and server info.
      * 
      * @param groupConfig the configuration for the server group
-     * @param serverName the desired name for the new server
+     * @param serverInfo the server information including working directory
      * @return a CompletableFuture containing the created ServerInfo
      */
-    public abstract CompletableFuture<ServerInfo> createServer(ScalerConfig.Group groupConfig, String serverName);
+    public abstract CompletableFuture<ServerInfo> createServer(ScalerConfig.Group groupConfig, ServerInfo serverInfo);
     
     /**
      * Starts an existing server that is currently stopped.
      * 
-     * @param serverId the unique identifier of the server to start
-     * @return a CompletableFuture containing true if successful, false otherwise
+     * @param server the server to start
+     * @return a CompletableFuture containing void when complete
      */
-    public abstract CompletableFuture<Boolean> startServer(String serverId);
+    public abstract CompletableFuture<Void> startServer(ServerInfo server);
     
     /**
      * Stops a running server gracefully.
      * 
-     * @param serverId the unique identifier of the server to stop
-     * @return a CompletableFuture containing true if successful, false otherwise
+     * @param server the server to stop
+     * @return a CompletableFuture containing void when complete
      */
-    public abstract CompletableFuture<Boolean> stopServer(String serverId);
+    public abstract CompletableFuture<Void> stopServer(ServerInfo server);
     
     /**
      * Permanently deletes a server and releases all associated resources.
