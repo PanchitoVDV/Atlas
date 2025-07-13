@@ -22,10 +22,11 @@ group:
 
   service-provider:
     docker:
-      image: "itzg/mc-proxy:latest" # Docker image for Minecraft proxy (supports Velocity, BungeeCord, etc.)
+      image: "itzg/mc-proxy:latest"
+      volume-mount-path: "/server"
       memory: "1G"
       cpu: "0.5"
       environment:
-        TYPE: "VELOCITY" # Use Velocity as the proxy type
+        TYPE: "VELOCITY"
         MEMORY: "768M"
         EULA: "TRUE"

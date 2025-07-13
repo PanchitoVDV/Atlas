@@ -762,7 +762,6 @@ public final class DockerServiceProvider extends ServiceProvider {
 
             int containerCount = containers.size();
             if (containerCount == 0) {
-                Logger.info("No Atlas-managed containers found");
                 return;
             }
 
