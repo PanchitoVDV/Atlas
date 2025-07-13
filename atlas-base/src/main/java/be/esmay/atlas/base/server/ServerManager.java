@@ -71,10 +71,10 @@ public final class ServerManager {
         return CompletableFuture.runAsync(() -> {
             if (server.isManuallyScaled()) {
                 scaler.removeManualServer(server.getServerId());
-                Logger.info("Manual server removal initiated: " + server.getName());
+                Logger.debug("Manual server removal initiated: " + server.getName());
             } else {
                 scaler.remove(server);
-                Logger.info("Server removal initiated: " + server.getName());
+                Logger.debug("Server removal initiated: " + server.getName());
             }
         });
     }

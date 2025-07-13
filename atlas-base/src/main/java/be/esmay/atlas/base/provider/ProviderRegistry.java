@@ -2,6 +2,7 @@ package be.esmay.atlas.base.provider;
 
 import be.esmay.atlas.base.config.impl.AtlasConfig;
 import be.esmay.atlas.base.provider.impl.InMemoryServiceProvider;
+import be.esmay.atlas.base.provider.impl.DockerServiceProvider;
 import be.esmay.atlas.base.utils.Logger;
 
 import java.util.HashMap;
@@ -13,6 +14,7 @@ public final class ProviderRegistry {
 
     static {
         PROVIDERS.put("IN_MEMORY", InMemoryServiceProvider.class);
+        PROVIDERS.put("DOCKER", DockerServiceProvider.class);
     }
 
     public static void registerScaler(String actionKey, Class<? extends ServiceProvider> scalerClass) {

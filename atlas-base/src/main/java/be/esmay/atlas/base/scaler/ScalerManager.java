@@ -2,6 +2,7 @@ package be.esmay.atlas.base.scaler;
 
 import be.esmay.atlas.base.AtlasBase;
 import be.esmay.atlas.base.config.impl.ScalerConfig;
+import be.esmay.atlas.base.provider.ServiceProvider;
 import be.esmay.atlas.base.utils.Logger;
 import lombok.Getter;
 import org.apache.commons.io.FileUtils;
@@ -27,6 +28,7 @@ public final class ScalerManager {
 
     public void initialize() {
         this.loadScalers();
+        this.ensureAllResourcesReady();
         this.startScalingTask();
     }
 
@@ -60,6 +62,23 @@ public final class ScalerManager {
             this.scalers.add(scaler);
             Logger.info("Loaded scaler {} with type {}", scaler.getGroupName(), type);
         }
+    }
+
+    private void ensureAllResourcesReady() {
+        ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
+        
+        Logger.info("Ensuring all resources are ready before starting scalers...");
+        
+        for (Scaler scaler : this.scalers) {
+            try {
+                provider.ensureResourcesReady(scaler.getScalerConfig().getGroup()).get();
+            } catch (Exception e) {
+                Logger.error("Failed to prepare resources for scaler {}: {}", scaler.getGroupName(), e.getMessage());
+                throw new RuntimeException("Cannot start scaling - resource preparation failed", e);
+            }
+        }
+        
+        Logger.info("All Docker images are ready - starting scalers");
     }
 
     private void startScalingTask() {

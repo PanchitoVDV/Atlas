@@ -150,7 +150,7 @@ public final class CommandManager {
         String commandName = parts[0].toLowerCase();
         String[] args = parts.length > 1 ? parts[1].split("\\s+") : new String[0];
 
-        if ("help".equals(commandName) || "?".equals(commandName)) {
+        if (commandName.equals("help") || commandName.equals("?")) {
             this.showHelp(args);
             return;
         }

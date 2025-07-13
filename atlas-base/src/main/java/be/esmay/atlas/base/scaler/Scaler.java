@@ -165,7 +165,7 @@ public abstract class Scaler {
         
         CompletableFuture<Void> acceptFuture = createFuture.thenAccept(server -> {
             this.addServer(server);
-            Logger.info("Successfully created auto-scaled server: {}", server.getName());
+            Logger.info("Started server: {}", server.getName());
         });
         
         return acceptFuture.exceptionally(throwable -> {
@@ -274,10 +274,15 @@ public abstract class Scaler {
         if (server == null || !this.servers.containsKey(server.getServerId()))
             return;
 
-        Logger.info("Removing server: {} from group: {}", server.getName(), this.groupName);
+        Logger.debug("Removing server: {} from group: {}", server.getName(), this.groupName);
 
-        this.servers.remove(server.getServerId());
-        this.shutdownServer(server);
+        this.shutdownServer(server).thenRun(() -> {
+            this.servers.remove(server.getServerId());
+            Logger.info("Stopped server: {}", server.getName());
+        }).exceptionally(throwable -> {
+            Logger.error("Failed to stop server {}, keeping in tracking", server.getName(), throwable);
+            return null;
+        });
     }
 
     private CompletableFuture<Void> shutdownServer(ServerInfo server) {

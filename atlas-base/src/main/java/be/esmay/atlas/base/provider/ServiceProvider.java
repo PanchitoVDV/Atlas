@@ -117,4 +117,24 @@ public abstract class ServiceProvider {
      * @return a CompletableFuture containing true if successful, false otherwise
      */
     public abstract CompletableFuture<Boolean> stopLogStream(String subscriptionId);
+    
+    /**
+     * Ensures that all required resources (images, etc.) are available before scaling.
+     * This method should block until all resources are ready.
+     * 
+     * @param groupConfig the configuration for the server group
+     * @return a CompletableFuture that completes when resources are ready
+     */
+    public CompletableFuture<Void> ensureResourcesReady(ScalerConfig.Group groupConfig) {
+        // Default implementation does nothing - providers can override
+        return CompletableFuture.completedFuture(null);
+    }
+
+    /**
+     * Shuts down the service provider and releases all resources.
+     * This method should be called when the application is shutting down.
+     */
+    public void shutdown() {
+        // Default implementation does nothing - providers can override
+    }
 }

@@ -90,6 +90,9 @@ public final class AtlasConfig extends ConfigurateConfig {
         @Setting("auto-create-network")
         private boolean autoCreateNetwork;
 
+        @Setting("socket-path")
+        private String socketPath;
+
     }
 
     @Getter

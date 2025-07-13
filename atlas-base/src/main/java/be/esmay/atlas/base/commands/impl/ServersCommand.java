@@ -446,6 +446,8 @@ public final class ServersCommand implements AtlasCommand {
 
                 ServerInfo server = serverOpt.get();
 
+                Logger.info("Stopping server: " + server.getName());
+
                 this.serverManager.stopServer(server).exceptionally(throwable -> {
                     Logger.error("Failed to stop server: " + throwable.getMessage());
                     return null;

@@ -55,9 +55,6 @@ public final class ScalerConfig extends ConfigurateConfig {
         @Setting("max-servers")
         private int maxServers;
 
-        @Setting("max-players-per-server")
-        private int maxPlayersPerServer;
-
     }
 
     @Data
@@ -115,6 +112,9 @@ public final class ScalerConfig extends ConfigurateConfig {
         private String command;
 
         private Map<String, String> environment;
+
+        @Setting("volume-mount-path")
+        private String volumeMountPath;
 
     }
 }
