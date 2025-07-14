@@ -54,7 +54,7 @@ public final class ConnectionValidator extends ChannelInboundHandlerAdapter {
             }
         }
         
-        Logger.warn("Connection from {} rejected (not in allowed networks)", clientIp);
+        Logger.debug("Connection from {} rejected (not in allowed networks)", clientIp);
         return false;
     }
     
