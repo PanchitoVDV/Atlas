@@ -35,19 +35,23 @@ public final class ConfigManager {
     }
 
     private void copyExampleGroup(File groupsFolder) {
-        File targetFile = new File(groupsFolder, "_example.yml");
+        this.copyGroupFile(groupsFolder, "_example.yml");
+        this.copyGroupFile(groupsFolder, "proxy.yml");
+    }
+    
+    private void copyGroupFile(File groupsFolder, String fileName) {
+        File targetFile = new File(groupsFolder, fileName);
 
-        try (InputStream resourceStream = getClass().getClassLoader()
-                .getResourceAsStream("groups/_example.yml")) {
-
+        try (InputStream resourceStream = getClass().getClassLoader().getResourceAsStream("groups/" + fileName)) {
             if (resourceStream == null) {
-                Logger.error("Could not find groups/_example.yml in resources");
+                Logger.error("Could not find groups/{} in resources", fileName);
                 return;
             }
 
             Files.copy(resourceStream, targetFile.toPath());
+            Logger.debug("Copied default group configuration: {}", fileName);
         } catch (IOException e) {
-            Logger.error("Failed to copy example group configuration: " + e.getMessage());
+            Logger.error("Failed to copy group configuration {}: {}", fileName, e.getMessage());
         }
     }
 

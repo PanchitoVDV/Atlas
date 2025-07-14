@@ -1,7 +1,7 @@
-package be.esmay.atlas.base.network.packet.packets;
+package be.esmay.atlas.common.network.packet.packets;
 
-import be.esmay.atlas.base.network.packet.Packet;
-import be.esmay.atlas.base.network.packet.PacketHandler;
+import be.esmay.atlas.common.network.packet.Packet;
+import be.esmay.atlas.common.network.packet.PacketHandler;
 import be.esmay.atlas.common.models.ServerInfo;
 import com.google.gson.Gson;
 import io.netty.buffer.ByteBuf;

@@ -1,7 +1,6 @@
 package be.esmay.atlas.base.provider;
 
 import be.esmay.atlas.base.config.impl.AtlasConfig;
-import be.esmay.atlas.base.provider.impl.InMemoryServiceProvider;
 import be.esmay.atlas.base.provider.impl.DockerServiceProvider;
 import be.esmay.atlas.base.utils.Logger;
 
@@ -13,7 +12,6 @@ public final class ProviderRegistry {
     private static final Map<String, Class<? extends ServiceProvider>> PROVIDERS = new HashMap<>();
 
     static {
-        PROVIDERS.put("IN_MEMORY", InMemoryServiceProvider.class);
         PROVIDERS.put("DOCKER", DockerServiceProvider.class);
     }
 

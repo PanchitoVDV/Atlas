@@ -19,7 +19,11 @@ public final class ServerLifecycleManager {
     private final DirectoryManager directoryManager;
     private final TemplateManager templateManager;
 
-    public ServerLifecycleManager() {
+    private final AtlasBase atlasBase;
+
+    public ServerLifecycleManager(AtlasBase atlasBase) {
+        this.atlasBase = atlasBase;
+
         this.directoryManager = new DirectoryManager();
         this.templateManager = new TemplateManager();
     }
@@ -60,7 +64,8 @@ public final class ServerLifecycleManager {
     }
 
     public CompletableFuture<Void> deleteServerCompletely(ServiceProvider serviceProvider, ServerInfo server) {
-        boolean shouldCleanDirectory = server.getType() == ServerType.DYNAMIC;
+        boolean cleanupDynamicOnShutdown = this.atlasBase.getConfigManager().getAtlasConfig().getAtlas().getTemplates().isCleanupDynamicOnShutdown();
+        boolean shouldCleanDirectory = server.getType() == ServerType.DYNAMIC && cleanupDynamicOnShutdown;
 
         CompletableFuture<Void> stopFuture = serviceProvider.stopServer(server);
         CompletableFuture<Boolean> deleteFuture = stopFuture.thenCompose(v -> serviceProvider.deleteServer(server.getServerId()));
@@ -81,15 +86,14 @@ public final class ServerLifecycleManager {
     public CompletableFuture<Void> restartServer(ServiceProvider serviceProvider, ScalerConfig.Group groupConfig, ServerInfo server) {
         Logger.info("Restarting server: " + server.getName());
 
-        AtlasBase atlasInstance = AtlasBase.getInstance();
         WebSocketMessage restartStartMessage = WebSocketMessage.event("restart-started", server.getServerId());
-        atlasInstance.getApiManager().getWebSocketManager().sendToServerConnections(server.getServerId(), restartStartMessage);
+        this.atlasBase.getApiManager().getWebSocketManager().sendToServerConnections(server.getServerId(), restartStartMessage);
 
         CompletableFuture<Void> stopFuture = this.stopServer(serviceProvider, server, true);
         CompletableFuture<Void> startFuture = stopFuture.thenCompose(v -> {
             Logger.debug("Server stopped, starting again: " + server.getName());
             
-            atlasInstance.getApiManager().getWebSocketManager().stopLogStreamingForRestart(server.getServerId());
+            this.atlasBase.getApiManager().getWebSocketManager().stopLogStreamingForRestart(server.getServerId());
             
             return serviceProvider.startServer(server);
         });
@@ -112,7 +116,9 @@ public final class ServerLifecycleManager {
 
         String workingDirectory = this.directoryManager.createServerDirectory(server);
 
-        if (shouldApplyTemplates && groupConfig.getTemplates() != null && !groupConfig.getTemplates().isEmpty()) {
+        boolean downloadOnStartup = this.atlasBase.getConfigManager().getAtlasConfig().getAtlas().getTemplates().isDownloadOnStartup();
+        
+        if (downloadOnStartup && shouldApplyTemplates && groupConfig.getTemplates() != null && !groupConfig.getTemplates().isEmpty()) {
             this.templateManager.applyTemplates(workingDirectory, groupConfig.getTemplates());
         }
 

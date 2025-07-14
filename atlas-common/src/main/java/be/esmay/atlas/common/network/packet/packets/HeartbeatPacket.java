@@ -1,49 +1,48 @@
-package be.esmay.atlas.base.network.packet.packets;
+package be.esmay.atlas.common.network.packet.packets;
 
-import be.esmay.atlas.base.network.packet.Packet;
-import be.esmay.atlas.base.network.packet.PacketHandler;
-import be.esmay.atlas.common.models.ServerInfo;
-import com.google.gson.Gson;
-import com.google.gson.reflect.TypeToken;
+import be.esmay.atlas.common.network.packet.Packet;
+import be.esmay.atlas.common.network.packet.PacketHandler;
 import io.netty.buffer.ByteBuf;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
-import java.util.List;
 
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public final class ServerListPacket implements Packet {
+public final class HeartbeatPacket implements Packet {
     
-    private static final Gson GSON = new Gson();
-    private static final Type SERVER_LIST_TYPE = new TypeToken<List<ServerInfo>>(){}.getType();
-    
-    private List<ServerInfo> servers;
+    private String serverId;
+    private long timestamp;
+    private int onlinePlayers;
+    private int maxPlayers;
     
     @Override
     public int getId() {
-        return 0x11;
+        return 0x03;
     }
     
     @Override
     public void encode(ByteBuf buffer) {
-        String json = GSON.toJson(this.servers);
-        this.writeString(buffer, json);
+        this.writeString(buffer, this.serverId);
+        buffer.writeLong(this.timestamp);
+        buffer.writeInt(this.onlinePlayers);
+        buffer.writeInt(this.maxPlayers);
     }
     
     @Override
     public void decode(ByteBuf buffer) {
-        String json = this.readString(buffer);
-        this.servers = GSON.fromJson(json, SERVER_LIST_TYPE);
+        this.serverId = this.readString(buffer);
+        this.timestamp = buffer.readLong();
+        this.onlinePlayers = buffer.readInt();
+        this.maxPlayers = buffer.readInt();
     }
     
     @Override
     public void handle(PacketHandler handler) {
-        handler.handleServerList(this);
+        handler.handleHeartbeat(this);
     }
     
     private void writeString(ByteBuf buffer, String str) {

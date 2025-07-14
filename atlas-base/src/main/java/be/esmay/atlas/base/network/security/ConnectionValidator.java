@@ -1,19 +1,16 @@
 package be.esmay.atlas.base.network.security;
 
-import be.esmay.atlas.base.AtlasBase;
 import be.esmay.atlas.base.config.impl.AtlasConfig;
-import be.esmay.atlas.base.provider.impl.DockerServiceProvider;
 import be.esmay.atlas.base.utils.Logger;
-import com.github.dockerjava.api.DockerClient;
-import com.github.dockerjava.api.model.Network;
+import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 
 import java.net.InetSocketAddress;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 
+@ChannelHandler.Sharable
 public final class ConnectionValidator extends ChannelInboundHandlerAdapter {
     
     private final AtlasConfig.Network networkConfig;
@@ -32,6 +29,13 @@ public final class ConnectionValidator extends ChannelInboundHandlerAdapter {
             super.channelActive(ctx);
         } else {
             ctx.close();
+        }
+    }
+    
+    public void addAllowedNetwork(String network) {
+        if (network != null && !this.allowedNetworks.contains(network)) {
+            this.allowedNetworks.add(network);
+            Logger.debug("Added network {} to allowed networks", network);
         }
     }
     
@@ -55,58 +59,9 @@ public final class ConnectionValidator extends ChannelInboundHandlerAdapter {
     }
     
     private void initializeAllowedNetworks() {
-        AtlasBase atlasInstance = AtlasBase.getInstance();
-        if (atlasInstance == null || atlasInstance.getProviderManager() == null) {
-            return;
-        }
-        
-        if (atlasInstance.getProviderManager().getProvider() instanceof DockerServiceProvider) {
-            String dockerNetworkCidr = this.getDockerNetworkCidr();
-            if (dockerNetworkCidr != null) {
-                this.allowedNetworks.add(dockerNetworkCidr);
-                Logger.info("Automatically added Docker network {} to allowed networks", dockerNetworkCidr);
-            }
-        }
+        Logger.debug("Initial allowed networks: {}", this.allowedNetworks);
     }
     
-    private String getDockerNetworkCidr() {
-        try {
-            AtlasBase atlasInstance = AtlasBase.getInstance();
-            DockerServiceProvider dockerProvider = (DockerServiceProvider) atlasInstance.getProviderManager().getProvider();
-            
-            AtlasConfig.Docker dockerConfig = atlasInstance.getConfigManager().getAtlasConfig()
-                .getAtlas().getServiceProvider().getDocker();
-            
-            DockerClient dockerClient = this.getDockerClient(dockerProvider);
-            if (dockerClient == null) {
-                return null;
-            }
-            
-            List<Network> networks = dockerClient.listNetworksCmd()
-                .withNameFilter(dockerConfig.getNetwork())
-                .exec();
-            
-            if (!networks.isEmpty()) {
-                Network network = networks.get(0);
-                if (network.getIpam() != null && network.getIpam().getConfig() != null 
-                    && !network.getIpam().getConfig().isEmpty()) {
-                    return network.getIpam().getConfig().get(0).getSubnet();
-                }
-            }
-        } catch (Exception e) {
-            Logger.error("Failed to get Docker network CIDR", e);
-        }
-        return null;
-    }
-    
-    private DockerClient getDockerClient(DockerServiceProvider provider) {
-        try {
-            return (DockerClient) provider.getClass().getDeclaredField("dockerClient").get(provider);
-        } catch (Exception e) {
-            Logger.error("Failed to access Docker client", e);
-            return null;
-        }
-    }
     
     private boolean isIpInNetwork(String ip, String network) {
         try {

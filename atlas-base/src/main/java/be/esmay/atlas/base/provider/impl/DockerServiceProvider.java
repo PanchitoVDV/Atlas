@@ -3,6 +3,7 @@ package be.esmay.atlas.base.provider.impl;
 import be.esmay.atlas.base.AtlasBase;
 import be.esmay.atlas.base.config.impl.AtlasConfig;
 import be.esmay.atlas.base.config.impl.ScalerConfig;
+import be.esmay.atlas.base.directory.DirectoryManager;
 import be.esmay.atlas.base.provider.ServiceProvider;
 import be.esmay.atlas.base.utils.Logger;
 import be.esmay.atlas.common.enums.ServerStatus;
@@ -15,23 +16,34 @@ import com.github.dockerjava.api.command.CreateContainerResponse;
 import com.github.dockerjava.api.command.InspectContainerResponse;
 import com.github.dockerjava.api.command.LogContainerCmd;
 import com.github.dockerjava.api.model.Bind;
+import com.github.dockerjava.api.model.Container;
 import com.github.dockerjava.api.model.ContainerNetwork;
+import com.github.dockerjava.api.model.CpuStatsConfig;
+import com.github.dockerjava.api.model.ExposedPort;
 import com.github.dockerjava.api.model.Frame;
 import com.github.dockerjava.api.model.Info;
 import com.github.dockerjava.api.model.Network;
 import com.github.dockerjava.api.model.NetworkSettings;
+import com.github.dockerjava.api.model.PortBinding;
+import com.github.dockerjava.api.model.Ports;
 import com.github.dockerjava.api.model.PullResponseItem;
-import com.github.dockerjava.api.model.Volume;
-import com.github.dockerjava.api.model.Statistics;
 import com.github.dockerjava.api.model.StatisticNetworksConfig;
-import com.github.dockerjava.api.model.CpuStatsConfig;
+import com.github.dockerjava.api.model.Statistics;
+import com.github.dockerjava.api.model.Volume;
 import com.github.dockerjava.core.DefaultDockerClientConfig;
 import com.github.dockerjava.core.DockerClientBuilder;
 
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -57,6 +69,9 @@ public final class DockerServiceProvider extends ServiceProvider {
     private final Map<String, Map<String, Consumer<String>>> logSubscribers;
     private final ExecutorService executorService;
 
+    private final Set<Integer> usedProxyPorts;
+    private static final int PROXY_PORT_START = 25565;
+
     private static final Map<String, CompletableFuture<Void>> IMAGE_PULL_FUTURES = new ConcurrentHashMap<>();
     private static final Set<String> PULLED_IMAGES = ConcurrentHashMap.newKeySet();
 
@@ -67,6 +82,7 @@ public final class DockerServiceProvider extends ServiceProvider {
         this.serverContainerIds = new ConcurrentHashMap<>();
         this.logStreamConnections = new ConcurrentHashMap<>();
         this.logSubscribers = new ConcurrentHashMap<>();
+        this.usedProxyPorts = ConcurrentHashMap.newKeySet();
         this.executorService = Executors.newCachedThreadPool(r -> {
             Thread thread = new Thread(r, "Docker-Provider");
             thread.setDaemon(true);
@@ -108,6 +124,42 @@ public final class DockerServiceProvider extends ServiceProvider {
         }
 
         this.cleanupOldAtlasContainers();
+    }
+
+    @Override
+    public CompletableFuture<Void> initialize() {
+        return CompletableFuture.runAsync(() -> {
+            try {
+                String networkCidr = this.getDockerNetworkCidr();
+                if (networkCidr == null) return;
+
+                AtlasBase atlasBase = AtlasBase.getInstance();
+                if (atlasBase != null && atlasBase.getNettyServer() != null) {
+                    atlasBase.getNettyServer().getConnectionValidator().addAllowedNetwork(networkCidr);
+                    Logger.debug("Added Docker network {} to allowed networks", networkCidr);
+                }
+            } catch (Exception e) {
+                Logger.error("Failed to initialize Docker provider network settings", e);
+            }
+        });
+    }
+
+    private String getDockerNetworkCidr() {
+        try {
+            List<Network> networks = this.dockerClient.listNetworksCmd()
+                    .withNameFilter(this.dockerConfig.getNetwork())
+                    .exec();
+
+            if (!networks.isEmpty()) {
+                Network network = networks.getFirst();
+                if (network.getIpam() != null && network.getIpam().getConfig() != null && !network.getIpam().getConfig().isEmpty()) {
+                    return network.getIpam().getConfig().getFirst().getSubnet();
+                }
+            }
+        } catch (Exception e) {
+            Logger.error("Failed to get Docker network CIDR", e);
+        }
+        return null;
     }
 
     @Override
@@ -237,6 +289,10 @@ public final class DockerServiceProvider extends ServiceProvider {
                             volumePath = System.getProperty("user.dir") + "/" + volumePath;
                         }
                     }
+
+                    if (serverInfo != null && this.isProxyServer(serverInfo.getGroup())) {
+                        this.releaseProxyPortForContainer(containerId);
+                    }
                 } catch (Exception e) {
                     Logger.debug("Could not inspect container for cleanup info: {}", e.getMessage());
                 }
@@ -279,10 +335,11 @@ public final class DockerServiceProvider extends ServiceProvider {
         for (int attempt = 0; attempt < 20; attempt++) {
             try {
                 InspectContainerResponse containerInfo = this.dockerClient.inspectContainerCmd(containerId).exec();
-                if (!containerInfo.getState().getRunning()) {
+                if (Boolean.FALSE.equals(containerInfo.getState().getRunning())) {
                     Logger.debug("Container {} confirmed stopped after {} attempts", containerId.substring(0, 12), attempt + 1);
                     return;
                 }
+
                 Thread.sleep(500);
             } catch (Exception e) {
                 Logger.debug("Container {} no longer exists (stopped and removed)", containerId.substring(0, 12));
@@ -295,9 +352,19 @@ public final class DockerServiceProvider extends ServiceProvider {
 
     private void cleanupServerVolume(String volumePath, String serverId) {
         try {
-            File volumeDir = new File(volumePath);
-            if (volumeDir.exists() && volumeDir.isDirectory()) {
-                this.deleteDirectoryRecursively(volumeDir);
+            AtlasBase atlasInstance = AtlasBase.getInstance();
+            if (atlasInstance != null && atlasInstance.getConfigManager() != null) {
+                boolean cleanupDynamicOnShutdown = atlasInstance.getConfigManager().getAtlasConfig().getAtlas().getTemplates().isCleanupDynamicOnShutdown();
+                if (!cleanupDynamicOnShutdown) {
+                    Logger.debug("Dynamic volume cleanup is disabled in config for server: {}", serverId);
+                    return;
+                }
+            }
+
+            DirectoryManager directoryManager = new DirectoryManager();
+            Path volumeDir = Paths.get(volumePath);
+            if (Files.exists(volumeDir)) {
+                directoryManager.deleteDirectoryRecursively(volumeDir);
                 Logger.debug("Cleaned up volume directory for dynamic server: {}", serverId);
             }
         } catch (Exception e) {
@@ -305,28 +372,6 @@ public final class DockerServiceProvider extends ServiceProvider {
         }
     }
 
-    private void deleteDirectoryRecursively(File directory) throws IOException {
-        if (!directory.exists()) {
-            return;
-        }
-
-        File[] files = directory.listFiles();
-        if (files != null) {
-            for (File file : files) {
-                if (file.isDirectory()) {
-                    this.deleteDirectoryRecursively(file);
-                } else {
-                    if (!file.delete()) {
-                        throw new IOException("Failed to delete file: " + file.getAbsolutePath());
-                    }
-                }
-            }
-        }
-
-        if (!directory.delete()) {
-            throw new IOException("Failed to delete directory: " + directory.getAbsolutePath());
-        }
-    }
 
     @Override
     public CompletableFuture<Optional<ServerInfo>> getServer(String serverId) {
@@ -493,11 +538,11 @@ public final class DockerServiceProvider extends ServiceProvider {
             envVars.add("SERVER_UUID=" + serverInfo.getServerId());
             envVars.add("ATLAS_MANAGED=true");
             envVars.add("SERVER_TYPE=" + groupConfig.getServer().getType());
-            
+
             AtlasBase atlasInstance = AtlasBase.getInstance();
             if (atlasInstance != null && atlasInstance.getConfigManager() != null) {
                 AtlasConfig.Network networkConfig = atlasInstance.getConfigManager().getAtlasConfig().getAtlas().getNetwork();
-                envVars.add("ATLAS_HOST=atlas-base");
+                envVars.add("ATLAS_HOST=" + this.getHostIpForContainers());
                 envVars.add("ATLAS_PORT=" + networkConfig.getPort());
                 envVars.add("ATLAS_NETTY_KEY=" + networkConfig.getNettyKey());
             }
@@ -522,6 +567,13 @@ public final class DockerServiceProvider extends ServiceProvider {
                     .withEnv(envVars)
                     .withBinds(this.createBinds(dockerGroupConfig, serverInfo))
                     .withNetworkMode(this.dockerConfig.getNetwork());
+
+            if (this.isProxyServer(serverInfo.getGroup())) {
+                int hostPort = this.getNextAvailableProxyPort();
+                createCmd = createCmd.withPortBindings(PortBinding.parse(hostPort + ":25565"));
+
+                Logger.debug("Exposing proxy {} on host port {}", serverInfo.getName(), hostPort);
+            }
 
             if (dockerGroupConfig.getMemory() != null && !dockerGroupConfig.getMemory().isEmpty()) {
                 createCmd = createCmd.withMemory(this.parseMemory(dockerGroupConfig.getMemory()));
@@ -691,6 +743,51 @@ public final class DockerServiceProvider extends ServiceProvider {
         return "localhost";
     }
 
+    private String getHostIpForContainers() {
+        try {
+            NetworkInterface networkInterface = NetworkInterface.getByName("eth0");
+            if (networkInterface == null) {
+                networkInterface = NetworkInterface.getByName("en0");
+            }
+            if (networkInterface == null) {
+                Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+                while (interfaces.hasMoreElements()) {
+                    NetworkInterface iface = interfaces.nextElement();
+                    if (!iface.isLoopback() && iface.isUp()) {
+                        networkInterface = iface;
+                        break;
+                    }
+                }
+            }
+
+            if (networkInterface != null) {
+                Enumeration<InetAddress> addresses = networkInterface.getInetAddresses();
+                while (addresses.hasMoreElements()) {
+                    InetAddress address = addresses.nextElement();
+                    if (!address.isLoopbackAddress() && address instanceof Inet4Address) {
+                        Logger.debug("Using host IP for Atlas host: {}", address.getHostAddress());
+                        return address.getHostAddress();
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Logger.warn("Failed to get host network interface: {}", e.getMessage());
+        }
+
+        try {
+            InetAddress localHost = InetAddress.getLocalHost();
+            String hostAddress = localHost.getHostAddress();
+            if (!hostAddress.equals("127.0.0.1")) {
+                Logger.debug("Using local host IP for Atlas host: {}", hostAddress);
+                return hostAddress;
+            }
+        } catch (Exception e) {
+            Logger.warn("Failed to resolve local host: {}", e.getMessage());
+        }
+
+        Logger.info("Using fallback Docker bridge gateway IP for Atlas host: 172.17.0.1");
+        return "172.17.0.1";
+    }
 
     private void createNetworkIfNotExists() {
         try {
@@ -760,14 +857,14 @@ public final class DockerServiceProvider extends ServiceProvider {
                 }
 
                 final Statistics[] statsContainer = new Statistics[1];
-                
-                ResultCallback.Adapter<Statistics> callback = 
-                    new ResultCallback.Adapter<Statistics>() {
-                        @Override
-                        public void onNext(Statistics statistics) {
-                            statsContainer[0] = statistics;
-                        }
-                    };
+
+                ResultCallback.Adapter<Statistics> callback =
+                        new ResultCallback.Adapter<Statistics>() {
+                            @Override
+                            public void onNext(Statistics statistics) {
+                                statsContainer[0] = statistics;
+                            }
+                        };
 
                 this.dockerClient.statsCmd(containerId).exec(callback);
                 Thread.sleep(1000);
@@ -781,7 +878,7 @@ public final class DockerServiceProvider extends ServiceProvider {
                 double cpuUsage = this.calculateCpuUsage(statistics);
                 long memoryUsed = statistics.getMemoryStats().getUsage() != null ? statistics.getMemoryStats().getUsage() : 0L;
                 long memoryLimit = statistics.getMemoryStats().getLimit() != null ? statistics.getMemoryStats().getLimit() : 0L;
-                
+
                 Map<String, StatisticNetworksConfig> networkStats = statistics.getNetworks();
                 long networkRx = 0L;
                 long networkTx = 0L;
@@ -795,15 +892,15 @@ public final class DockerServiceProvider extends ServiceProvider {
                 }
 
                 return ServerStats.builder()
-                    .cpuUsagePercent(cpuUsage)
-                    .memoryUsedBytes(memoryUsed)
-                    .memoryTotalBytes(memoryLimit)
-                    .diskUsedBytes(0L)
-                    .diskTotalBytes(0L)
-                    .networkRxBytes(networkRx)
-                    .networkTxBytes(networkTx)
-                    .timestamp(System.currentTimeMillis())
-                    .build();
+                        .cpuUsagePercent(cpuUsage)
+                        .memoryUsedBytes(memoryUsed)
+                        .memoryTotalBytes(memoryLimit)
+                        .diskUsedBytes(0L)
+                        .diskTotalBytes(0L)
+                        .networkRxBytes(networkRx)
+                        .networkTxBytes(networkTx)
+                        .timestamp(System.currentTimeMillis())
+                        .build();
 
             } catch (Exception e) {
                 Logger.error("Error collecting Docker container stats: {}", e.getMessage());
@@ -815,7 +912,7 @@ public final class DockerServiceProvider extends ServiceProvider {
     private double calculateCpuUsage(Statistics statistics) {
         CpuStatsConfig cpuStats = statistics.getCpuStats();
         CpuStatsConfig preCpuStats = statistics.getPreCpuStats();
-        
+
         if (cpuStats == null || preCpuStats == null) {
             return 0.0;
         }
@@ -831,7 +928,7 @@ public final class DockerServiceProvider extends ServiceProvider {
 
         double cpuDelta = cpuTotal - preCpuTotal;
         double systemDelta = systemTotal - preSystemTotal;
-        
+
         if (systemDelta > 0.0 && cpuDelta > 0.0) {
             Long onlineCpusLong = cpuStats.getOnlineCpus();
             int onlineCpus = onlineCpusLong != null ? onlineCpusLong.intValue() : Runtime.getRuntime().availableProcessors();
@@ -840,7 +937,7 @@ public final class DockerServiceProvider extends ServiceProvider {
             }
             return (cpuDelta / systemDelta) * onlineCpus * 100.0;
         }
-        
+
         return 0.0;
     }
 
@@ -881,7 +978,7 @@ public final class DockerServiceProvider extends ServiceProvider {
         try {
             Logger.info("Stopping and removing all Atlas-managed Docker containers...");
 
-            List<com.github.dockerjava.api.model.Container> containers = this.dockerClient.listContainersCmd()
+            List<Container> containers = this.dockerClient.listContainersCmd()
                     .withLabelFilter(Map.of("atlas.managed", "true"))
                     .withShowAll(true)
                     .exec();
@@ -893,7 +990,7 @@ public final class DockerServiceProvider extends ServiceProvider {
 
             Logger.info("Found {} Atlas-managed containers to remove", containerCount);
 
-            for (com.github.dockerjava.api.model.Container container : containers) {
+            for (Container container : containers) {
                 String containerId = container.getId();
                 String containerName = container.getNames()[0];
 
@@ -924,7 +1021,7 @@ public final class DockerServiceProvider extends ServiceProvider {
 
     private void cleanupOldAtlasContainers() {
         try {
-            List<com.github.dockerjava.api.model.Container> containers = this.dockerClient.listContainersCmd()
+            List<Container> containers = this.dockerClient.listContainersCmd()
                     .withLabelFilter(Map.of("atlas.managed", "true"))
                     .withShowAll(true)
                     .exec();
@@ -934,7 +1031,7 @@ public final class DockerServiceProvider extends ServiceProvider {
             if (!containers.isEmpty()) {
                 Logger.debug("Found {} old Atlas containers to clean up", containers.size());
 
-                for (com.github.dockerjava.api.model.Container container : containers) {
+                for (Container container : containers) {
                     String containerId = container.getId();
                     String containerName = container.getNames()[0];
 
@@ -988,6 +1085,15 @@ public final class DockerServiceProvider extends ServiceProvider {
 
     private void cleanupOrphanedDynamicVolumes(List<String> knownVolumePaths) {
         try {
+            AtlasBase atlasInstance = AtlasBase.getInstance();
+            if (atlasInstance != null && atlasInstance.getConfigManager() != null) {
+                boolean cleanupDynamicOnShutdown = atlasInstance.getConfigManager().getAtlasConfig().getAtlas().getTemplates().isCleanupDynamicOnShutdown();
+                if (!cleanupDynamicOnShutdown) {
+                    Logger.debug("Dynamic volume cleanup is disabled in config");
+                    return;
+                }
+            }
+
             File serversDir = new File("servers");
             if (!serversDir.exists() || !serversDir.isDirectory()) {
                 return;
@@ -1009,7 +1115,8 @@ public final class DockerServiceProvider extends ServiceProvider {
 
                 if (knownVolumePaths.contains(absolutePath)) {
                     try {
-                        this.deleteDirectoryRecursively(serverDir);
+                        DirectoryManager directoryManager = new DirectoryManager();
+                        directoryManager.deleteDirectoryRecursively(serverDir.toPath());
                         cleanedCount++;
                         Logger.debug("Cleaned up orphaned dynamic server volume: {}", serverDir.getName());
                     } catch (Exception e) {
@@ -1019,11 +1126,11 @@ public final class DockerServiceProvider extends ServiceProvider {
 
                 boolean hasRunningContainer = false;
                 try {
-                    List<com.github.dockerjava.api.model.Container> runningContainers = this.dockerClient.listContainersCmd()
+                    List<Container> runningContainers = this.dockerClient.listContainersCmd()
                             .withLabelFilter(Map.of("atlas.managed", "true"))
                             .exec();
 
-                    for (com.github.dockerjava.api.model.Container container : runningContainers) {
+                    for (Container container : runningContainers) {
                         if (container.getNames()[0].contains(serverDir.getName())) {
                             hasRunningContainer = true;
                             break;
@@ -1035,7 +1142,8 @@ public final class DockerServiceProvider extends ServiceProvider {
 
                 if (!hasRunningContainer && !knownVolumePaths.contains(absolutePath)) {
                     try {
-                        this.deleteDirectoryRecursively(serverDir);
+                        DirectoryManager directoryManager = new DirectoryManager();
+                        directoryManager.deleteDirectoryRecursively(serverDir.toPath());
                         cleanedCount++;
                         Logger.debug("Cleaned up orphaned server volume: {}", serverDir.getName());
                     } catch (Exception e) {
@@ -1050,6 +1158,52 @@ public final class DockerServiceProvider extends ServiceProvider {
 
         } catch (Exception e) {
             Logger.debug("Error during volume cleanup: {}", e.getMessage());
+        }
+    }
+
+    private int getNextAvailableProxyPort() {
+        int port = PROXY_PORT_START;
+        while (this.usedProxyPorts.contains(port)) {
+            port++;
+        }
+        this.usedProxyPorts.add(port);
+        return port;
+    }
+
+    private void releaseProxyPort(int port) {
+        this.usedProxyPorts.remove(port);
+    }
+
+    private boolean isProxyServer(String group) {
+        return group != null && group.equalsIgnoreCase("proxy");
+    }
+
+    private void releaseProxyPortForContainer(String containerId) {
+        try {
+            InspectContainerResponse containerInfo = this.dockerClient.inspectContainerCmd(containerId).exec();
+            if (containerInfo.getNetworkSettings() != null &&
+                    containerInfo.getNetworkSettings().getPorts() != null) {
+
+                Ports ports = containerInfo.getNetworkSettings().getPorts();
+                for (Map.Entry<ExposedPort, Ports.Binding[]> entry : ports.getBindings().entrySet()) {
+                    ExposedPort exposedPort = entry.getKey();
+                    Ports.Binding[] bindings = entry.getValue();
+
+                    if (bindings != null && exposedPort.getPort() == 25565) {
+                        for (Ports.Binding binding : bindings) {
+                            try {
+                                int hostPort = Integer.parseInt(binding.getHostPortSpec());
+                                this.releaseProxyPort(hostPort);
+                                Logger.debug("Released proxy port {} for container {}", hostPort, containerId.substring(0, 12));
+                            } catch (NumberFormatException e) {
+                                Logger.debug("Could not parse host port: {}", binding.getHostPortSpec());
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Logger.debug("Could not release proxy port for container {}: {}", containerId.substring(0, 12), e.getMessage());
         }
     }
 }

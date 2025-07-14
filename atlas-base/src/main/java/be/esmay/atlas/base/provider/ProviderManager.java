@@ -17,6 +17,8 @@ public final class ProviderManager {
             Logger.error("No valid service provider found in configuration.");
             return;
         }
+
+        this.provider.initialize().join();
     }
 
     public void shutdown() {

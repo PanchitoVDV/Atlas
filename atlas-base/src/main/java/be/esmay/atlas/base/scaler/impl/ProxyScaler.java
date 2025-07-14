@@ -13,8 +13,6 @@ public final class ProxyScaler extends Scaler {
 
     public ProxyScaler(String groupName, ScalerConfig scalerConfig) {
         super(groupName, scalerConfig);
-
-        Logger.info("Initialized ProxyScaler for group: {}", groupName);
     }
 
     @Override

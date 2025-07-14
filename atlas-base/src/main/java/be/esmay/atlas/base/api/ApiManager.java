@@ -23,7 +23,10 @@ public final class ApiManager {
 
     private volatile boolean running = false;
 
-    public ApiManager() {
+    private final AtlasBase atlasBase;
+
+    public ApiManager(AtlasBase atlasBase) {
+        this.atlasBase = atlasBase;
         this.vertx = Vertx.vertx();
     }
 
@@ -33,7 +36,7 @@ public final class ApiManager {
         }
 
         try {
-            this.config = AtlasBase.getInstance().getConfigManager().getAtlasConfig().getAtlas();
+            this.config = this.atlasBase.getConfigManager().getAtlasConfig().getAtlas();
             this.authHandler = new ApiAuthHandler(this.config.getNetwork().getApiKey());
             this.webSocketManager = new WebSocketManager(this.authHandler);
             this.router = Router.router(this.vertx);

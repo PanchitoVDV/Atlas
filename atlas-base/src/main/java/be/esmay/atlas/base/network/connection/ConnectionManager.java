@@ -1,8 +1,8 @@
 package be.esmay.atlas.base.network.connection;
 
 import be.esmay.atlas.base.AtlasBase;
-import be.esmay.atlas.base.network.packet.Packet;
-import be.esmay.atlas.base.network.packet.packets.ServerRemovePacket;
+import be.esmay.atlas.common.network.packet.Packet;
+import be.esmay.atlas.common.network.packet.packets.ServerRemovePacket;
 import be.esmay.atlas.base.server.ServerManager;
 import be.esmay.atlas.base.utils.Logger;
 import be.esmay.atlas.common.enums.ServerType;
@@ -36,7 +36,7 @@ public final class ConnectionManager {
         Connection connection = new Connection(channel);
         this.connections.put(channel, connection);
         
-        Logger.info("New connection from {}", connection.getRemoteAddress());
+        Logger.debug("New connection from {}", connection.getRemoteAddress());
     }
     
     public void removeConnection(Channel channel) {
@@ -50,7 +50,7 @@ public final class ConnectionManager {
             this.handleServerDisconnection(connection.getServerId());
         }
         
-        Logger.info("Connection from {} disconnected", connection.getRemoteAddress());
+        Logger.debug("Connection from {} disconnected", connection.getRemoteAddress());
     }
     
     public Connection getConnection(Channel channel) {

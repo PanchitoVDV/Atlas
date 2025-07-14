@@ -29,6 +29,12 @@ public final class ScalerManager {
 
     private volatile boolean isShuttingDown = false;
 
+    private final AtlasBase atlasBase;
+
+    public ScalerManager(AtlasBase atlasBase) {
+        this.atlasBase = atlasBase;
+    }
+
     public void initialize() {
         this.loadScalers();
         this.ensureAllResourcesReady();
@@ -68,7 +74,7 @@ public final class ScalerManager {
     }
 
     private void ensureAllResourcesReady() {
-        ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
+        ServiceProvider provider = this.atlasBase.getProviderManager().getProvider();
         
         Logger.info("Ensuring all resources are ready before starting scalers...");
         
@@ -85,7 +91,7 @@ public final class ScalerManager {
     }
 
     private void startScalingTask() {
-        int checkInterval = AtlasBase.getInstance().getConfigManager().getAtlasConfig().getAtlas().getScaling().getCheckInterval();
+        int checkInterval = this.atlasBase.getConfigManager().getAtlasConfig().getAtlas().getScaling().getCheckInterval();
 
         this.scheduledExecutor = new ScheduledThreadPoolExecutor(1, r -> {
             Thread thread = new Thread(r, "Atlas-Scaler");

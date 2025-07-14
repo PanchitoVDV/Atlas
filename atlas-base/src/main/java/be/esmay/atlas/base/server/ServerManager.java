@@ -15,9 +15,11 @@ import java.util.concurrent.CompletableFuture;
 public final class ServerManager {
 
     private final ServerLifecycleManager lifecycleManager;
+    private final AtlasBase atlasBase;
 
-    public ServerManager(ServerLifecycleManager lifecycleManager) {
+    public ServerManager(ServerLifecycleManager lifecycleManager, AtlasBase atlasBase) {
         this.lifecycleManager = lifecycleManager;
+        this.atlasBase = atlasBase;
     }
 
     public CompletableFuture<Void> startServer(ServerInfo server) {
@@ -31,15 +33,14 @@ public final class ServerManager {
             return CompletableFuture.failedFuture(new IllegalStateException("No scaler found for group: " + server.getGroup()));
         }
 
-        ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
+        ServiceProvider provider = this.atlasBase.getProviderManager().getProvider();
 
         CompletableFuture<Void> startFuture = this.lifecycleManager.startServer(provider, scaler.getScalerConfig().getGroup(), server);
         return startFuture.thenRun(() -> {
             Logger.info("Successfully started server: " + server.getName());
-            
-            AtlasBase atlasInstance = AtlasBase.getInstance();
-            if (atlasInstance != null && atlasInstance.getNettyServer() != null) {
-                atlasInstance.getNettyServer().broadcastServerUpdate(server);
+
+            if (this.atlasBase.getNettyServer() != null) {
+                this.atlasBase.getNettyServer().broadcastServerUpdate(server);
             }
         });
     }
@@ -50,7 +51,7 @@ public final class ServerManager {
             return CompletableFuture.completedFuture(null);
         }
 
-        ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
+        ServiceProvider provider = this.atlasBase.getProviderManager().getProvider();
 
         if (server.getType() == ServerType.DYNAMIC) {
             return this.removeServer(server);
@@ -59,16 +60,12 @@ public final class ServerManager {
         CompletableFuture<Void> stopFuture = this.lifecycleManager.stopServer(provider, server, false);
         return stopFuture.thenRun(() -> {
             Logger.info("Successfully stopped server: " + server.getName());
-            AtlasBase atlasInstance = AtlasBase.getInstance();
-            atlasInstance.getApiManager().getWebSocketManager().disconnectServerConnections(
-                server.getServerId(), "Server was stopped"
-            );
-            
-            if (atlasInstance.getNettyServer() != null) {
-                atlasInstance.getNettyServer().broadcastServerUpdate(server);
+            this.atlasBase.getApiManager().getWebSocketManager().disconnectServerConnections(server.getServerId(), "Server was stopped");
+
+            if (this.atlasBase.getNettyServer() != null) {
+                this.atlasBase.getNettyServer().broadcastServerUpdate(server);
             }
         });
-
     }
 
     public CompletableFuture<Void> restartServer(ServerInfo server) {
@@ -77,21 +74,20 @@ public final class ServerManager {
             return CompletableFuture.failedFuture(new IllegalStateException("No scaler found for group: " + server.getGroup()));
         }
 
-        ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
+        ServiceProvider provider = this.atlasBase.getProviderManager().getProvider();
 
         CompletableFuture<Void> restartFuture = this.lifecycleManager.restartServer(provider, scaler.getScalerConfig().getGroup(), server);
         return restartFuture.thenRun(() -> {
             Logger.info("Successfully restarted server: " + server.getName());
-            
+
             WebSocketMessage restartMessage = WebSocketMessage.event("restart-completed", server.getServerId());
-            AtlasBase atlasInstance = AtlasBase.getInstance();
-            atlasInstance.getApiManager().getWebSocketManager().sendToServerConnections(server.getServerId(), restartMessage);
-            
-            atlasInstance.getApiManager().getWebSocketManager().restartLogStreamingForServer(server.getServerId());
-            
-            if (atlasInstance.getNettyServer() != null) {
-                atlasInstance.getNettyServer().broadcastServerUpdate(server);
+            this.atlasBase.getApiManager().getWebSocketManager().sendToServerConnections(server.getServerId(), restartMessage);
+            this.atlasBase.getApiManager().getWebSocketManager().restartLogStreamingForServer(server.getServerId());
+
+            if (this.atlasBase.getNettyServer() != null) {
+                this.atlasBase.getNettyServer().broadcastServerUpdate(server);
             }
+
         });
     }
 
@@ -101,30 +97,25 @@ public final class ServerManager {
             return CompletableFuture.failedFuture(new IllegalStateException("No scaler found for group: " + server.getGroup()));
         }
 
+        CompletableFuture<Void> removeFuture = scaler.removeAsync(server);
+
         if (server.isManuallyScaled()) {
-            CompletableFuture<Void> removeFuture = scaler.removeAsync(server);
             return removeFuture.thenRun(() -> {
                 Logger.info("Successfully removed manual server: " + server.getName());
-                AtlasBase atlasInstance = AtlasBase.getInstance();
-                atlasInstance.getApiManager().getWebSocketManager().disconnectServerConnections(
-                    server.getServerId(), "Server was removed"
-                );
-                
-                if (atlasInstance.getNettyServer() != null) {
-                    atlasInstance.getNettyServer().broadcastServerRemove(server.getServerId(), "Server was removed");
+                this.atlasBase.getApiManager().getWebSocketManager().disconnectServerConnections(server.getServerId(), "Server was removed");
+
+                if (this.atlasBase.getNettyServer() != null) {
+                    this.atlasBase.getNettyServer().broadcastServerRemove(server.getServerId(), "Server was removed");
                 }
+
             });
         } else {
-            CompletableFuture<Void> removeFuture = scaler.removeAsync(server);
             return removeFuture.thenRun(() -> {
                 Logger.info("Successfully removed server: " + server.getName());
-                AtlasBase atlasInstance = AtlasBase.getInstance();
-                atlasInstance.getApiManager().getWebSocketManager().disconnectServerConnections(
-                    server.getServerId(), "Server was removed"
-                );
-                
-                if (atlasInstance.getNettyServer() != null) {
-                    atlasInstance.getNettyServer().broadcastServerRemove(server.getServerId(), "Server was removed");
+                this.atlasBase.getApiManager().getWebSocketManager().disconnectServerConnections(server.getServerId(), "Server was removed");
+
+                if (this.atlasBase.getNettyServer() != null) {
+                    this.atlasBase.getNettyServer().broadcastServerRemove(server.getServerId(), "Server was removed");
                 }
             });
         }

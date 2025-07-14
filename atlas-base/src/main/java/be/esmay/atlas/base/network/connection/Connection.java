@@ -1,6 +1,6 @@
 package be.esmay.atlas.base.network.connection;
 
-import be.esmay.atlas.base.network.packet.Packet;
+import be.esmay.atlas.common.network.packet.Packet;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import lombok.Getter;

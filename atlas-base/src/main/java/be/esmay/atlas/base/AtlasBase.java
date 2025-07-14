@@ -9,6 +9,7 @@ import be.esmay.atlas.base.provider.ProviderManager;
 import be.esmay.atlas.base.scaler.ScalerManager;
 import be.esmay.atlas.base.server.ServerManager;
 import be.esmay.atlas.base.utils.Logger;
+import lombok.Data;
 import lombok.Getter;
 
 import java.io.File;
@@ -19,7 +20,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
-@Getter
+@Data
 public final class AtlasBase {
 
     @Getter
@@ -32,6 +33,7 @@ public final class AtlasBase {
     private final CommandManager commandManager;
     private final ServerManager serverManager;
     private final ApiManager apiManager;
+
     private NettyServer nettyServer;
 
     private volatile boolean running = false;
@@ -46,10 +48,10 @@ public final class AtlasBase {
         this.executorService = Executors.newVirtualThreadPerTaskExecutor();
         this.configManager = new ConfigManager();
         this.providerManager = new ProviderManager();
-        this.scalerManager = new ScalerManager();
+        this.scalerManager = new ScalerManager(this);
         this.commandManager = new CommandManager();
-        this.serverManager = new ServerManager(new ServerLifecycleManager());
-        this.apiManager = new ApiManager();
+        this.serverManager = new ServerManager(new ServerLifecycleManager(this), this);
+        this.apiManager = new ApiManager(this);
 
         Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown, "Atlas-Shutdown"));
     }
@@ -73,6 +75,8 @@ public final class AtlasBase {
                 this.commandManager.initialize();
                 this.apiManager.start();
                 this.nettyServer.start();
+
+                Thread.sleep(500);
 
                 this.running = true;
                 Logger.info("Atlas is now running and ready to use.");

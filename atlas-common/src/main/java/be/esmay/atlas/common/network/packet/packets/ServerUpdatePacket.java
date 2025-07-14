@@ -1,7 +1,9 @@
-package be.esmay.atlas.base.network.packet.packets;
+package be.esmay.atlas.common.network.packet.packets;
 
-import be.esmay.atlas.base.network.packet.Packet;
-import be.esmay.atlas.base.network.packet.PacketHandler;
+import be.esmay.atlas.common.network.packet.Packet;
+import be.esmay.atlas.common.network.packet.PacketHandler;
+import com.google.gson.Gson;
+import be.esmay.atlas.common.models.ServerInfo;
 import io.netty.buffer.ByteBuf;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -12,37 +14,31 @@ import java.nio.charset.StandardCharsets;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public final class HeartbeatPacket implements Packet {
+public final class ServerUpdatePacket implements Packet {
     
-    private String serverId;
-    private long timestamp;
-    private int onlinePlayers;
-    private int maxPlayers;
+    private static final Gson GSON = new Gson();
+    private ServerInfo serverInfo;
     
     @Override
     public int getId() {
-        return 0x03;
+        return 0x10;
     }
     
     @Override
     public void encode(ByteBuf buffer) {
-        this.writeString(buffer, this.serverId);
-        buffer.writeLong(this.timestamp);
-        buffer.writeInt(this.onlinePlayers);
-        buffer.writeInt(this.maxPlayers);
+        String json = GSON.toJson(this.serverInfo);
+        this.writeString(buffer, json);
     }
     
     @Override
     public void decode(ByteBuf buffer) {
-        this.serverId = this.readString(buffer);
-        this.timestamp = buffer.readLong();
-        this.onlinePlayers = buffer.readInt();
-        this.maxPlayers = buffer.readInt();
+        String json = this.readString(buffer);
+        this.serverInfo = GSON.fromJson(json, ServerInfo.class);
     }
     
     @Override
     public void handle(PacketHandler handler) {
-        handler.handleHeartbeat(this);
+        handler.handleServerUpdate(this);
     }
     
     private void writeString(ByteBuf buffer, String str) {

@@ -1,12 +1,14 @@
-package be.esmay.atlas.base.network.packet;
+package be.esmay.atlas.common.network.packet;
 
-import be.esmay.atlas.base.network.packet.packets.AuthenticationPacket;
-import be.esmay.atlas.base.network.packet.packets.HandshakePacket;
-import be.esmay.atlas.base.network.packet.packets.HeartbeatPacket;
-import be.esmay.atlas.base.network.packet.packets.ServerAddPacket;
-import be.esmay.atlas.base.network.packet.packets.ServerListPacket;
-import be.esmay.atlas.base.network.packet.packets.ServerRemovePacket;
-import be.esmay.atlas.base.network.packet.packets.ServerUpdatePacket;
+import be.esmay.atlas.common.network.packet.packets.AuthenticationPacket;
+import be.esmay.atlas.common.network.packet.packets.HandshakePacket;
+import be.esmay.atlas.common.network.packet.packets.HeartbeatPacket;
+import be.esmay.atlas.common.network.packet.packets.ServerAddPacket;
+import be.esmay.atlas.common.network.packet.packets.ServerInfoUpdatePacket;
+import be.esmay.atlas.common.network.packet.packets.ServerListPacket;
+import be.esmay.atlas.common.network.packet.packets.ServerListRequestPacket;
+import be.esmay.atlas.common.network.packet.packets.ServerRemovePacket;
+import be.esmay.atlas.common.network.packet.packets.ServerUpdatePacket;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -25,6 +27,8 @@ public final class PacketRegistry {
         registerPacket(0x11, ServerListPacket.class, ServerListPacket::new);
         registerPacket(0x12, ServerAddPacket.class, ServerAddPacket::new);
         registerPacket(0x13, ServerRemovePacket.class, ServerRemovePacket::new);
+        registerPacket(0x14, ServerListRequestPacket.class, ServerListRequestPacket::new);
+        registerPacket(0x20, ServerInfoUpdatePacket.class, ServerInfoUpdatePacket::new);
     }
     
     private static <T extends Packet> void registerPacket(int id, Class<T> clazz, Supplier<T> supplier) {

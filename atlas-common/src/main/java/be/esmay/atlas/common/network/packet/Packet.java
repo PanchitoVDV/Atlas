@@ -1,4 +1,4 @@
-package be.esmay.atlas.base.network.packet;
+package be.esmay.atlas.common.network.packet;
 
 import io.netty.buffer.ByteBuf;
 

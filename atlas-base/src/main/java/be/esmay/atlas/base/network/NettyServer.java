@@ -2,10 +2,10 @@ package be.esmay.atlas.base.network;
 
 import be.esmay.atlas.base.config.impl.AtlasConfig;
 import be.esmay.atlas.base.network.connection.ConnectionManager;
-import be.esmay.atlas.base.network.packet.Packet;
-import be.esmay.atlas.base.network.packet.packets.ServerAddPacket;
-import be.esmay.atlas.base.network.packet.packets.ServerRemovePacket;
-import be.esmay.atlas.base.network.packet.packets.ServerUpdatePacket;
+import be.esmay.atlas.common.network.packet.Packet;
+import be.esmay.atlas.common.network.packet.packets.ServerAddPacket;
+import be.esmay.atlas.common.network.packet.packets.ServerRemovePacket;
+import be.esmay.atlas.common.network.packet.packets.ServerUpdatePacket;
 import be.esmay.atlas.base.network.security.AuthenticationHandler;
 import be.esmay.atlas.base.network.security.ConnectionValidator;
 import be.esmay.atlas.base.utils.Logger;
@@ -20,6 +20,7 @@ import lombok.Getter;
 
 import java.util.concurrent.CompletableFuture;
 
+@Getter
 public final class NettyServer {
     
     private final AtlasConfig.Network networkConfig;
@@ -30,8 +31,7 @@ public final class NettyServer {
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
     private ChannelFuture channelFuture;
-    
-    @Getter
+
     private volatile boolean running = false;
     
     public NettyServer(AtlasConfig.Network networkConfig) {

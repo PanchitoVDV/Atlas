@@ -1,8 +1,8 @@
 package be.esmay.atlas.base.network;
 
 import be.esmay.atlas.base.network.connection.ConnectionManager;
-import be.esmay.atlas.base.network.packet.PacketDecoder;
-import be.esmay.atlas.base.network.packet.PacketEncoder;
+import be.esmay.atlas.common.network.packet.PacketDecoder;
+import be.esmay.atlas.common.network.packet.PacketEncoder;
 import be.esmay.atlas.base.network.security.AuthenticationHandler;
 import be.esmay.atlas.base.network.security.ConnectionValidator;
 import io.netty.channel.ChannelInitializer;

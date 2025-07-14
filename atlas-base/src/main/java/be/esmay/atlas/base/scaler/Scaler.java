@@ -42,7 +42,7 @@ public abstract class Scaler {
         this.groupName = groupName;
         this.scalerConfig = scalerConfig;
         this.serviceProvider = AtlasBase.getInstance().getProviderManager().getProvider();
-        this.lifecycleManager = new ServerLifecycleManager();
+        this.lifecycleManager = new ServerLifecycleManager(AtlasBase.getInstance());
     }
 
     public abstract ScaleType needsScaling();
@@ -151,7 +151,7 @@ public abstract class Scaler {
 
     private CompletableFuture<Void> createAutoScaledServer() {
         ServerType serverType = ServerType.valueOf(this.scalerConfig.getGroup().getServer().getType().toUpperCase());
-        String serverId = this.getNextIdentifier(); // Use existing logic
+        String serverId = this.getNextIdentifier();
         Logger.debug("Creating auto-scaled server: {} for group: {}", serverId, this.groupName);
 
         CompletableFuture<ServerInfo> createFuture = this.lifecycleManager.createServer(
@@ -393,10 +393,12 @@ public abstract class Scaler {
 
     public void addServer(ServerInfo server) {
         this.servers.put(server.getServerId(), server);
-        
-        AtlasBase atlasInstance = AtlasBase.getInstance();
-        if (atlasInstance != null && atlasInstance.getNettyServer() != null) {
-            atlasInstance.getNettyServer().broadcastServerAdd(server);
+
+        if (server.getStatus() == ServerStatus.RUNNING) {
+            AtlasBase atlasInstance = AtlasBase.getInstance();
+            if (atlasInstance != null && atlasInstance.getNettyServer() != null) {
+                atlasInstance.getNettyServer().broadcastServerAdd(server);
+            }
         }
     }
 
@@ -416,6 +418,28 @@ public abstract class Scaler {
 
         server.setMaxPlayers(maxPlayers);
         server.setLastHeartbeat(System.currentTimeMillis());
+    }
+
+    public void updateServerStatus(String serverId, ServerStatus status) {
+        ServerInfo server = this.servers.get(serverId);
+        if (server == null)
+            return;
+
+        ServerStatus oldStatus = server.getStatus();
+        server.setStatus(status);
+        server.setLastHeartbeat(System.currentTimeMillis());
+
+        if (oldStatus != ServerStatus.RUNNING && status == ServerStatus.RUNNING) {
+            AtlasBase atlasInstance = AtlasBase.getInstance();
+            if (atlasInstance != null && atlasInstance.getNettyServer() != null) {
+                atlasInstance.getNettyServer().broadcastServerAdd(server);
+            }
+        } else if (oldStatus == ServerStatus.RUNNING && (status == ServerStatus.STOPPED || status == ServerStatus.ERROR)) {
+            AtlasBase atlasInstance = AtlasBase.getInstance();
+            if (atlasInstance != null && atlasInstance.getNettyServer() != null) {
+                atlasInstance.getNettyServer().broadcastServerRemove(serverId, "Server status changed to " + status);
+            }
+        }
     }
 
     protected boolean shouldScaleUp() {

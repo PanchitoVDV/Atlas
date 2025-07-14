@@ -5,25 +5,14 @@ atlas:
     api-port: 9090
     api-key: "your-secure-api-key"
     netty-key: "your-secure-netty-key"
-    bind-address: "0.0.0.0"
+    bind-address: "0.0.0.0" # Recommended to use 0.0.0.0 because otherwise Docker containers may not be able to access the API. You can whitelist specific networks below.
     allowed-networks:
       - "172.17.0.0/16"  # Default Docker network
-      - "10.0.0.0/8"     # Additional allowed network
     auth-required: true
     connection-timeout: 30
 
-  database:
-    type: "sqlite" # or mysql
-    url: "atlas.db"
-    # For MySQL:
-    # host: "localhost"
-    # port: 3306
-    # database: "atlas"
-    # username: "atlas"
-    # password: "password"
-
   service-provider:
-    type: "docker" # or docker-swarm
+    type: "docker"
     docker:
       network: "atlas-network"
       auto-create-network: true
@@ -33,5 +22,5 @@ atlas:
     cleanup-dynamic-on-shutdown: true
 
   scaling:
-    check-interval: 5 # seconds
-    cooldown: 30 # seconds between scaling actions
+    check-interval: 5
+    cooldown: 30

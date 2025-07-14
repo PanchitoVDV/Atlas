@@ -1,6 +1,6 @@
-package be.esmay.atlas.base.network.packet;
+package be.esmay.atlas.common.network.packet;
 
-import be.esmay.atlas.base.utils.Logger;
+import be.esmay.atlas.common.utils.Logger;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.ByteToMessageDecoder;

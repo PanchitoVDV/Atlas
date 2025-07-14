@@ -140,6 +140,17 @@ public abstract class ServiceProvider {
     }
 
     /**
+     * Initializes the service provider after construction.
+     * This method is called after all core services are initialized.
+     * 
+     * @return a CompletableFuture that completes when initialization is done
+     */
+    public CompletableFuture<Void> initialize() {
+        // Default implementation does nothing - providers can override
+        return CompletableFuture.completedFuture(null);
+    }
+    
+    /**
      * Shuts down the service provider and releases all resources.
      * This method should be called when the application is shutting down.
      */

@@ -1,44 +1,37 @@
-package be.esmay.atlas.base.network.packet.packets;
+package be.esmay.atlas.common.network.packet.packets;
 
-import be.esmay.atlas.base.network.packet.Packet;
-import be.esmay.atlas.base.network.packet.PacketHandler;
-import com.google.gson.Gson;
-import be.esmay.atlas.common.models.ServerInfo;
+import be.esmay.atlas.common.network.packet.Packet;
+import be.esmay.atlas.common.network.packet.PacketHandler;
 import io.netty.buffer.ByteBuf;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.nio.charset.StandardCharsets;
-
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public final class ServerUpdatePacket implements Packet {
+public final class ServerListRequestPacket implements Packet {
     
-    private static final Gson GSON = new Gson();
-    private ServerInfo serverInfo;
+    private String requesterId;
     
     @Override
     public int getId() {
-        return 0x10;
+        return 0x14;
     }
     
     @Override
     public void encode(ByteBuf buffer) {
-        String json = GSON.toJson(this.serverInfo);
-        this.writeString(buffer, json);
+        this.writeString(buffer, this.requesterId);
     }
     
     @Override
     public void decode(ByteBuf buffer) {
-        String json = this.readString(buffer);
-        this.serverInfo = GSON.fromJson(json, ServerInfo.class);
+        this.requesterId = this.readString(buffer);
     }
     
     @Override
     public void handle(PacketHandler handler) {
-        handler.handleServerUpdate(this);
+        handler.handleServerListRequest(this);
     }
     
     private void writeString(ByteBuf buffer, String str) {
@@ -46,7 +39,7 @@ public final class ServerUpdatePacket implements Packet {
             buffer.writeInt(-1);
             return;
         }
-        byte[] bytes = str.getBytes(StandardCharsets.UTF_8);
+        byte[] bytes = str.getBytes(java.nio.charset.StandardCharsets.UTF_8);
         buffer.writeInt(bytes.length);
         buffer.writeBytes(bytes);
     }
@@ -58,7 +51,7 @@ public final class ServerUpdatePacket implements Packet {
         }
         byte[] bytes = new byte[length];
         buffer.readBytes(bytes);
-        return new String(bytes, StandardCharsets.UTF_8);
+        return new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
     }
     
 }

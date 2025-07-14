@@ -25,8 +25,6 @@ public final class AtlasConfig extends ConfigurateConfig {
 
         private Network network;
 
-        private Database database;
-
         @Setting("service-provider")
         private ServiceProvider serviceProvider;
 
@@ -67,26 +65,6 @@ public final class AtlasConfig extends ConfigurateConfig {
         
         @Setting("connection-timeout")
         private int connectionTimeout = 30;
-
-    }
-
-    @Getter
-    @ConfigSerializable
-    public static class Database {
-
-        private String type;
-
-        private String url;
-
-        private String host;
-
-        private int port;
-
-        private String database;
-
-        private String username;
-
-        private String password;
 
     }
 

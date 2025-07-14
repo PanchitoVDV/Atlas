@@ -1,7 +1,7 @@
-package be.esmay.atlas.base.network.packet.packets;
+package be.esmay.atlas.common.network.packet.packets;
 
-import be.esmay.atlas.base.network.packet.Packet;
-import be.esmay.atlas.base.network.packet.PacketHandler;
+import be.esmay.atlas.common.network.packet.Packet;
+import be.esmay.atlas.common.network.packet.PacketHandler;
 import io.netty.buffer.ByteBuf;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -12,31 +12,40 @@ import java.nio.charset.StandardCharsets;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public final class ServerRemovePacket implements Packet {
+public final class HandshakePacket implements Packet {
     
-    private String serverId;
+    private String pluginType;
+    private String version;
+    private String authToken;
+    private boolean accepted;
     private String reason;
     
     @Override
     public int getId() {
-        return 0x13;
+        return 0x01;
     }
     
     @Override
     public void encode(ByteBuf buffer) {
-        this.writeString(buffer, this.serverId);
+        this.writeString(buffer, this.pluginType);
+        this.writeString(buffer, this.version);
+        this.writeString(buffer, this.authToken);
+        buffer.writeBoolean(this.accepted);
         this.writeString(buffer, this.reason);
     }
     
     @Override
     public void decode(ByteBuf buffer) {
-        this.serverId = this.readString(buffer);
+        this.pluginType = this.readString(buffer);
+        this.version = this.readString(buffer);
+        this.authToken = this.readString(buffer);
+        this.accepted = buffer.readBoolean();
         this.reason = this.readString(buffer);
     }
     
     @Override
     public void handle(PacketHandler handler) {
-        handler.handleServerRemove(this);
+        handler.handleHandshake(this);
     }
     
     private void writeString(ByteBuf buffer, String str) {

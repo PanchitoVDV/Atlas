@@ -67,7 +67,7 @@ public final class DirectoryManager {
     }
 
 
-    private void deleteDirectoryRecursively(Path directory) throws IOException {
+    public void deleteDirectoryRecursively(Path directory) throws IOException {
         this.makeDirectoryTreeWritable(directory);
 
         try (Stream<Path> paths = Files.walk(directory)) {

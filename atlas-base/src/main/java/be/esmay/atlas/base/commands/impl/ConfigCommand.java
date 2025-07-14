@@ -79,23 +79,6 @@ public final class ConfigCommand implements AtlasCommand {
         }
         Logger.info("");
 
-        Logger.info("Database:");
-        AtlasConfig.Database database = config.getDatabase();
-        if (database != null) {
-            Logger.info("  Type: " + database.getType());
-            Logger.info("  Host: " + database.getHost());
-            Logger.info("  Port: " + database.getPort());
-            Logger.info("  Database: " + database.getDatabase());
-            Logger.info("  Username: " + database.getUsername());
-            Logger.info("  Password: " + (database.getPassword() != null ? "[CONFIGURED]" : "[NOT SET]"));
-            if (database.getUrl() != null) {
-                Logger.info("  URL: " + database.getUrl());
-            }
-        } else {
-            Logger.info("  [NOT CONFIGURED]");
-        }
-        Logger.info("");
-
         Logger.info("Service Provider:");
         AtlasConfig.ServiceProvider serviceProvider = config.getServiceProvider();
         if (serviceProvider != null) {
