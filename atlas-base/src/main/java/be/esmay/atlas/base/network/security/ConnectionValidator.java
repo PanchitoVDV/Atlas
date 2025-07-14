@@ -40,11 +40,10 @@ public final class ConnectionValidator extends ChannelInboundHandlerAdapter {
     }
     
     private boolean isConnectionAllowed(ChannelHandlerContext ctx) {
-        if (!(ctx.channel().remoteAddress() instanceof InetSocketAddress)) {
+        if (!(ctx.channel().remoteAddress() instanceof InetSocketAddress remoteAddress)) {
             return false;
         }
-        
-        InetSocketAddress remoteAddress = (InetSocketAddress) ctx.channel().remoteAddress();
+
         String clientIp = remoteAddress.getHostString();
         
         for (String allowedNetwork : this.allowedNetworks) {
