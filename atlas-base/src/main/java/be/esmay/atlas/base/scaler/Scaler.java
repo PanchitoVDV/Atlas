@@ -285,13 +285,31 @@ public abstract class Scaler {
         });
     }
 
+    public CompletableFuture<Void> removeAsync(ServerInfo server) {
+        if (server == null || !this.servers.containsKey(server.getServerId())) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        Logger.debug("Removing server: {} from group: {}", server.getName(), this.groupName);
+
+        CompletableFuture<Void> deleteFuture = this.lifecycleManager.deleteServerCompletely(this.serviceProvider, server);
+        CompletableFuture<Void> completionFuture = deleteFuture.thenRun(() -> {
+            this.servers.remove(server.getServerId());
+            Logger.info("Stopped server: {}", server.getName());
+        });
+        return completionFuture.exceptionally(throwable -> {
+            Logger.error("Failed to stop server {}, keeping in tracking", server.getName(), throwable);
+            return null;
+        });
+    }
+
     private CompletableFuture<Void> shutdownServer(ServerInfo server) {
-        return AtlasBase.getInstance().getServerManager().forceDeleteServer(server)
-                .thenRun(() -> Logger.debug("Successfully removed server: {}", server.getName()))
-                .exceptionally(throwable -> {
-                    Logger.error("Failed to shutdown server: {}", server.getName(), throwable);
-                    return null;
-                });
+        CompletableFuture<Void> deleteFuture = this.lifecycleManager.deleteServerCompletely(this.serviceProvider, server);
+        CompletableFuture<Void> completionFuture = deleteFuture.thenRun(() -> Logger.debug("Successfully removed server: {}", server.getName()));
+        return completionFuture.exceptionally(throwable -> {
+            Logger.error("Failed to shutdown server: {}", server.getName(), throwable);
+            return null;
+        });
     }
 
     public List<ServerInfo> getServers() {

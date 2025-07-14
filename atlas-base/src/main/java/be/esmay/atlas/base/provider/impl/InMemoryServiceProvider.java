@@ -7,6 +7,7 @@ import be.esmay.atlas.common.enums.ServerStatus;
 import be.esmay.atlas.common.enums.ServerType;
 import be.esmay.atlas.base.config.impl.ScalerConfig;
 import be.esmay.atlas.base.utils.Logger;
+import be.esmay.atlas.common.models.ServerStats;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -386,6 +387,57 @@ public final class InMemoryServiceProvider extends ServiceProvider {
         }
     }
     
+    @Override
+    public CompletableFuture<ServerStats> getServerStats(String serverId) {
+        return CompletableFuture.supplyAsync(() -> {
+            ServerInfo server = this.servers.get(serverId);
+            if (server == null) {
+                throw new IllegalArgumentException("Server not found: " + serverId);
+            }
+
+            if (server.getStatus() != ServerStatus.RUNNING) {
+                return ServerStats.builder()
+                    .cpuUsagePercent(0.0)
+                    .memoryUsedBytes(0L)
+                    .memoryTotalBytes(1024L * 1024L * 1024L)
+                    .diskUsedBytes(0L)
+                    .diskTotalBytes(10L * 1024L * 1024L * 1024L)
+                    .networkRxBytes(0L)
+                    .networkTxBytes(0L)
+                    .timestamp(System.currentTimeMillis())
+                    .build();
+            }
+
+            java.util.Random random = new java.util.Random();
+            int playerCount = server.getOnlinePlayers();
+            
+            double baseCpuUsage = Math.max(5.0, playerCount * 2.5);
+            double cpuUsage = baseCpuUsage + (random.nextGaussian() * 10.0);
+            cpuUsage = Math.max(0.0, Math.min(100.0, cpuUsage));
+            
+            long baseMemoryUsage = 500L * 1024L * 1024L + (playerCount * 50L * 1024L * 1024L);
+            long memoryUsed = baseMemoryUsage + (long)(random.nextGaussian() * 100L * 1024L * 1024L);
+            memoryUsed = Math.max(100L * 1024L * 1024L, Math.min(2L * 1024L * 1024L * 1024L, memoryUsed));
+            
+            long diskUsed = 2L * 1024L * 1024L * 1024L + (long)(random.nextGaussian() * 500L * 1024L * 1024L);
+            diskUsed = Math.max(1L * 1024L * 1024L * 1024L, Math.min(8L * 1024L * 1024L * 1024L, diskUsed));
+
+            long networkRx = System.currentTimeMillis() / 1000 * (playerCount + 1) * (50 + random.nextInt(100));
+            long networkTx = System.currentTimeMillis() / 1000 * (playerCount + 1) * (30 + random.nextInt(70));
+
+            return ServerStats.builder()
+                .cpuUsagePercent(cpuUsage)
+                .memoryUsedBytes(memoryUsed)
+                .memoryTotalBytes(4L * 1024L * 1024L * 1024L)
+                .diskUsedBytes(diskUsed)
+                .diskTotalBytes(10L * 1024L * 1024L * 1024L)
+                .networkRxBytes(networkRx)
+                .networkTxBytes(networkTx)
+                .timestamp(System.currentTimeMillis())
+                .build();
+        });
+    }
+
     /**
      * Shuts down the heartbeat system when the provider is no longer needed.
      */

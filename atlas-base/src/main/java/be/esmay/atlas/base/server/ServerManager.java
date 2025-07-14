@@ -1,6 +1,7 @@
 package be.esmay.atlas.base.server;
 
 import be.esmay.atlas.base.AtlasBase;
+import be.esmay.atlas.base.api.dto.WebSocketMessage;
 import be.esmay.atlas.base.lifecycle.ServerLifecycleManager;
 import be.esmay.atlas.base.provider.ServiceProvider;
 import be.esmay.atlas.base.scaler.Scaler;
@@ -47,7 +48,14 @@ public final class ServerManager {
             return this.removeServer(server);
         }
 
-        return this.lifecycleManager.stopServer(provider, server, false).thenRun(() -> Logger.info("Successfully stopped server: " + server.getName()));
+        CompletableFuture<Void> stopFuture = this.lifecycleManager.stopServer(provider, server, false);
+        return stopFuture.thenRun(() -> {
+            Logger.info("Successfully stopped server: " + server.getName());
+            AtlasBase atlasInstance = AtlasBase.getInstance();
+            atlasInstance.getApiManager().getWebSocketManager().disconnectServerConnections(
+                server.getServerId(), "Server was stopped"
+            );
+        });
 
     }
 
@@ -59,7 +67,16 @@ public final class ServerManager {
 
         ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
 
-        return this.lifecycleManager.restartServer(provider, scaler.getScalerConfig().getGroup(), server).thenRun(() -> Logger.info("Successfully restarted server: " + server.getName()));
+        CompletableFuture<Void> restartFuture = this.lifecycleManager.restartServer(provider, scaler.getScalerConfig().getGroup(), server);
+        return restartFuture.thenRun(() -> {
+            Logger.info("Successfully restarted server: " + server.getName());
+            
+            WebSocketMessage restartMessage = WebSocketMessage.event("restart-completed", server.getServerId());
+            AtlasBase atlasInstance = AtlasBase.getInstance();
+            atlasInstance.getApiManager().getWebSocketManager().sendToServerConnections(server.getServerId(), restartMessage);
+            
+            atlasInstance.getApiManager().getWebSocketManager().restartLogStreamingForServer(server.getServerId());
+        });
     }
 
     public CompletableFuture<Void> removeServer(ServerInfo server) {
@@ -68,20 +85,25 @@ public final class ServerManager {
             return CompletableFuture.failedFuture(new IllegalStateException("No scaler found for group: " + server.getGroup()));
         }
 
-        return CompletableFuture.runAsync(() -> {
-            if (server.isManuallyScaled()) {
-                scaler.removeManualServer(server.getServerId());
-                Logger.debug("Manual server removal initiated: " + server.getName());
-            } else {
-                scaler.remove(server);
-                Logger.debug("Server removal initiated: " + server.getName());
-            }
-        });
-    }
-
-    public CompletableFuture<Void> forceDeleteServer(ServerInfo server) {
-        ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
-        return this.lifecycleManager.deleteServerCompletely(provider, server);
+        if (server.isManuallyScaled()) {
+            CompletableFuture<Void> removeFuture = scaler.removeAsync(server);
+            return removeFuture.thenRun(() -> {
+                Logger.info("Successfully removed manual server: " + server.getName());
+                AtlasBase atlasInstance = AtlasBase.getInstance();
+                atlasInstance.getApiManager().getWebSocketManager().disconnectServerConnections(
+                    server.getServerId(), "Server was removed"
+                );
+            });
+        } else {
+            CompletableFuture<Void> removeFuture = scaler.removeAsync(server);
+            return removeFuture.thenRun(() -> {
+                Logger.info("Successfully removed server: " + server.getName());
+                AtlasBase atlasInstance = AtlasBase.getInstance();
+                atlasInstance.getApiManager().getWebSocketManager().disconnectServerConnections(
+                    server.getServerId(), "Server was removed"
+                );
+            });
+        }
     }
 
     private Scaler getScalerForServer(ServerInfo server) {

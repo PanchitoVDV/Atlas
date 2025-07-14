@@ -1,0 +1,424 @@
+package be.esmay.atlas.base.api;
+
+import io.swagger.v3.oas.models.Components;
+import io.swagger.v3.oas.models.OpenAPI;
+import io.swagger.v3.oas.models.Operation;
+import io.swagger.v3.oas.models.PathItem;
+import io.swagger.v3.oas.models.Paths;
+import io.swagger.v3.oas.models.info.Contact;
+import io.swagger.v3.oas.models.info.Info;
+import io.swagger.v3.oas.models.info.License;
+import io.swagger.v3.oas.models.media.ArraySchema;
+import io.swagger.v3.oas.models.media.Content;
+import io.swagger.v3.oas.models.media.MediaType;
+import io.swagger.v3.oas.models.media.ObjectSchema;
+import io.swagger.v3.oas.models.media.Schema;
+import io.swagger.v3.oas.models.media.StringSchema;
+import io.swagger.v3.oas.models.parameters.Parameter;
+import io.swagger.v3.oas.models.parameters.RequestBody;
+import io.swagger.v3.oas.models.responses.ApiResponse;
+import io.swagger.v3.oas.models.responses.ApiResponses;
+import io.swagger.v3.oas.models.security.SecurityRequirement;
+import io.swagger.v3.oas.models.security.SecurityScheme;
+import io.swagger.v3.oas.models.servers.Server;
+
+import java.util.List;
+import java.util.Map;
+
+public final class OpenApiGenerator {
+
+    public static OpenAPI generateOpenApiSpec() {
+        OpenAPI openAPI = new OpenAPI();
+        
+        openAPI.setInfo(createInfo());
+        openAPI.setServers(createServers());
+        openAPI.setPaths(createPaths());
+        openAPI.setComponents(createComponents());
+        openAPI.addSecurityItem(new SecurityRequirement().addList("bearerAuth"));
+        
+        return openAPI;
+    }
+
+    private static Info createInfo() {
+        return new Info()
+            .title("Atlas Server Management API")
+            .description("REST API for managing Atlas server scaling and monitoring with real-time WebSocket support")
+            .version("1.0.0")
+            .contact(new Contact()
+                .name("Atlas Development Team")
+                .email("support@atlas.local"))
+            .license(new License()
+                .name("MIT License")
+                .url("https://opensource.org/licenses/MIT"));
+    }
+
+    private static List<Server> createServers() {
+        return List.of(
+            new Server()
+                .url("http://localhost:9090")
+                .description("Local development server"),
+            new Server()
+                .url("https://api.atlas.local")
+                .description("Production server")
+        );
+    }
+
+    private static Paths createPaths() {
+        Paths paths = new Paths();
+        
+        paths.addPathItem("/api/v1/status", createStatusPath());
+        paths.addPathItem("/api/v1/servers", createServersPath());
+        paths.addPathItem("/api/v1/servers/{id}", createServerByIdPath());
+        paths.addPathItem("/api/v1/servers/{id}/start", createServerActionPath("start"));
+        paths.addPathItem("/api/v1/servers/{id}/stop", createServerActionPath("stop"));
+        paths.addPathItem("/api/v1/groups", createGroupsPath());
+        paths.addPathItem("/api/v1/groups/{group}/scale", createScalePath());
+        paths.addPathItem("/api/v1/scaling", createScalingPath());
+        paths.addPathItem("/api/v1/metrics", createMetricsPath());
+        paths.addPathItem("/api/v1/servers/{id}/ws", createWebSocketPath());
+        
+        return paths;
+    }
+
+    private static PathItem createStatusPath() {
+        return new PathItem()
+            .get(new Operation()
+                .operationId("getStatus")
+                .summary("Get Atlas status")
+                .description("Returns the current status and health of the Atlas system")
+                .addTagsItem("System")
+                .addSecurityItem(new SecurityRequirement().addList("bearerAuth"))
+                .responses(createStandardResponses()
+                    .addApiResponse("200", new ApiResponse()
+                        .description("Atlas status information")
+                        .content(new Content()
+                            .addMediaType("application/json", new MediaType()
+                                .schema(new Schema<>().$ref("#/components/schemas/StatusResponse")))))));
+    }
+
+    private static PathItem createServersPath() {
+        return new PathItem()
+            .get(new Operation()
+                .operationId("getServers")
+                .summary("List servers")
+                .description("Returns a list of all servers, optionally filtered by group")
+                .addTagsItem("Servers")
+                .addSecurityItem(new SecurityRequirement().addList("bearerAuth"))
+                .addParametersItem(new Parameter()
+                    .name("group")
+                    .in("query")
+                    .description("Filter servers by group name")
+                    .required(false)
+                    .style(Parameter.StyleEnum.FORM)
+                    .explode(true)
+                    .schema(new StringSchema()))
+                .responses(createStandardResponses()
+                    .addApiResponse("200", new ApiResponse()
+                        .description("List of servers")
+                        .content(new Content()
+                            .addMediaType("application/json", new MediaType()
+                                .schema(new Schema<>().$ref("#/components/schemas/ServerListResponse")))))))
+            .post(new Operation()
+                .operationId("createServers")
+                .summary("Create servers")
+                .description("Creates new servers in the specified group")
+                .addTagsItem("Servers")
+                .addSecurityItem(new SecurityRequirement().addList("bearerAuth"))
+                .requestBody(new RequestBody()
+                    .description("Server creation parameters")
+                    .required(true)
+                    .content(new Content()
+                        .addMediaType("application/json", new MediaType()
+                            .schema(new Schema<>().$ref("#/components/schemas/CreateServerRequest")))))
+                .responses(createStandardResponses()
+                    .addApiResponse("200", new ApiResponse()
+                        .description("Server creation initiated")
+                        .content(new Content()
+                            .addMediaType("application/json", new MediaType()
+                                .schema(new Schema<>().$ref("#/components/schemas/ApiResponse")))))));
+    }
+
+    private static PathItem createServerByIdPath() {
+        Parameter serverIdParam = new Parameter()
+            .name("id")
+            .in("path")
+            .description("Server ID")
+            .required(true)
+            .style(Parameter.StyleEnum.SIMPLE)
+            .explode(false)
+            .schema(new StringSchema());
+
+        return new PathItem()
+            .get(new Operation()
+                .operationId("getServer")
+                .summary("Get server details")
+                .description("Returns detailed information about a specific server")
+                .addTagsItem("Servers")
+                .addParametersItem(serverIdParam)
+                .responses(createStandardResponses()
+                    .addApiResponse("200", new ApiResponse()
+                        .description("Server details")
+                        .content(new Content()
+                            .addMediaType("application/json", new MediaType()
+                                .schema(new Schema<>().$ref("#/components/schemas/ServerResponse")))))
+                    .addApiResponse("404", new ApiResponse()
+                        .description("Server not found"))))
+            .delete(new Operation()
+                .operationId("removeServer")
+                .summary("Remove server")
+                .description("Permanently removes a server")
+                .addTagsItem("Servers")
+                .addParametersItem(serverIdParam)
+                .responses(createStandardResponses()
+                    .addApiResponse("200", new ApiResponse()
+                        .description("Server removal initiated")
+                        .content(new Content()
+                            .addMediaType("application/json", new MediaType()
+                                .schema(new Schema<>().$ref("#/components/schemas/ApiResponse")))))
+                    .addApiResponse("404", new ApiResponse()
+                        .description("Server not found"))));
+    }
+
+    private static PathItem createServerActionPath(String action) {
+        Parameter serverIdParam = new Parameter()
+            .name("id")
+            .in("path")
+            .description("Server ID")
+            .required(true)
+            .style(Parameter.StyleEnum.SIMPLE)
+            .explode(false)
+            .schema(new StringSchema());
+
+        return new PathItem()
+            .post(new Operation()
+                .operationId(action + "Server")
+                .summary(action.substring(0, 1).toUpperCase() + action.substring(1) + " server")
+                .description(action.substring(0, 1).toUpperCase() + action.substring(1) + "s the specified server")
+                .addTagsItem("Servers")
+                .addParametersItem(serverIdParam)
+                .responses(createStandardResponses()
+                    .addApiResponse("200", new ApiResponse()
+                        .description("Server " + action + " initiated")
+                        .content(new Content()
+                            .addMediaType("application/json", new MediaType()
+                                .schema(new Schema<>().$ref("#/components/schemas/ApiResponse")))))
+                    .addApiResponse("404", new ApiResponse()
+                        .description("Server not found"))));
+    }
+
+    private static PathItem createGroupsPath() {
+        return new PathItem()
+            .get(new Operation()
+                .operationId("getGroups")
+                .summary("List scaling groups")
+                .description("Returns a list of all available scaling groups")
+                .addTagsItem("Scaling")
+                .responses(createStandardResponses()
+                    .addApiResponse("200", new ApiResponse()
+                        .description("List of scaling groups")
+                        .content(new Content()
+                            .addMediaType("application/json", new MediaType()
+                                .schema(new Schema<>().$ref("#/components/schemas/GroupListResponse")))))));
+    }
+
+    private static PathItem createScalePath() {
+        Parameter groupParam = new Parameter()
+            .name("group")
+            .in("path")
+            .description("Group name")
+            .required(true)
+            .style(Parameter.StyleEnum.SIMPLE)
+            .explode(false)
+            .schema(new StringSchema());
+
+        return new PathItem()
+            .post(new Operation()
+                .operationId("scaleGroup")
+                .summary("Scale group")
+                .description("Manually scales a group up or down")
+                .addTagsItem("Scaling")
+                .addParametersItem(groupParam)
+                .requestBody(new RequestBody()
+                    .description("Scaling parameters")
+                    .required(true)
+                    .content(new Content()
+                        .addMediaType("application/json", new MediaType()
+                            .schema(new Schema<>().$ref("#/components/schemas/ScaleRequest")))))
+                .responses(createStandardResponses()
+                    .addApiResponse("200", new ApiResponse()
+                        .description("Scaling initiated")
+                        .content(new Content()
+                            .addMediaType("application/json", new MediaType()
+                                .schema(new Schema<>().$ref("#/components/schemas/ApiResponse")))))
+                    .addApiResponse("404", new ApiResponse()
+                        .description("Group not found"))));
+    }
+
+    private static PathItem createScalingPath() {
+        return new PathItem()
+            .get(new Operation()
+                .operationId("getScaling")
+                .summary("Get scaling configuration")
+                .description("Returns the current scaling configuration for all groups")
+                .addTagsItem("Scaling")
+                .responses(createStandardResponses()
+                    .addApiResponse("200", new ApiResponse()
+                        .description("Scaling configuration")
+                        .content(new Content()
+                            .addMediaType("application/json", new MediaType()
+                                .schema(new Schema<>().$ref("#/components/schemas/ScalingResponse")))))));
+    }
+
+    private static PathItem createMetricsPath() {
+        return new PathItem()
+            .get(new Operation()
+                .operationId("getMetrics")
+                .summary("Get system metrics")
+                .description("Returns system-wide metrics and statistics")
+                .addTagsItem("Monitoring")
+                .responses(createStandardResponses()
+                    .addApiResponse("200", new ApiResponse()
+                        .description("System metrics")
+                        .content(new Content()
+                            .addMediaType("application/json", new MediaType()
+                                .schema(new Schema<>().$ref("#/components/schemas/MetricsResponse")))))));
+    }
+
+    private static PathItem createWebSocketPath() {
+        Parameter serverIdParam = new Parameter()
+            .name("id")
+            .in("path")
+            .description("Server ID")
+            .required(true)
+            .style(Parameter.StyleEnum.SIMPLE)
+            .explode(false)
+            .schema(new StringSchema());
+
+        return new PathItem()
+            .get(new Operation()
+                .operationId("connectWebSocket")
+                .summary("Server WebSocket connection")
+                .description("Establishes a WebSocket connection for real-time communication with a specific server. Supports live log streaming, server stats, and command execution.")
+                .addTagsItem("WebSocket")
+                .addParametersItem(serverIdParam)
+                .addParametersItem(new Parameter()
+                    .name("auth")
+                    .in("query")
+                    .description("Bearer token for authentication (alternative to Authorization header)")
+                    .required(false)
+                    .style(Parameter.StyleEnum.FORM)
+                    .explode(true)
+                    .schema(new StringSchema()))
+                .responses(new ApiResponses()
+                    .addApiResponse("101", new ApiResponse()
+                        .description("WebSocket connection established"))
+                    .addApiResponse("401", new ApiResponse()
+                        .description("Unauthorized - invalid or missing API key"))
+                    .addApiResponse("404", new ApiResponse()
+                        .description("Server not found"))));
+    }
+
+    private static ApiResponses createStandardResponses() {
+        return new ApiResponses()
+            .addApiResponse("401", new ApiResponse()
+                .description("Unauthorized - invalid or missing API key"))
+            .addApiResponse("500", new ApiResponse()
+                .description("Internal server error"));
+    }
+
+    private static Operation createOperation(String operationId, String summary, String description, String tag) {
+        return new Operation()
+            .operationId(operationId)
+            .summary(summary)
+            .description(description)
+            .addTagsItem(tag)
+            .addSecurityItem(new SecurityRequirement().addList("bearerAuth"));
+    }
+
+    private static Components createComponents() {
+        Components components = new Components();
+        
+        SecurityScheme bearerAuth = new SecurityScheme()
+            .type(SecurityScheme.Type.HTTP)
+            .scheme("bearer")
+            .bearerFormat("JWT")
+            .description("Bearer token authentication using API key");
+        
+        components.addSecuritySchemes("bearerAuth", bearerAuth);
+        components.setSchemas(createSchemas());
+        
+        return components;
+    }
+
+    private static Map<String, Schema> createSchemas() {
+        return Map.of(
+            "ApiResponse", new ObjectSchema()
+                .addProperty("status", new StringSchema().example("success"))
+                .addProperty("data", new ObjectSchema().nullable(true))
+                .addProperty("message", new StringSchema().nullable(true))
+                .addProperty("timestamp", new Schema<>().type("integer").format("int64")),
+            
+            "StatusResponse", new ObjectSchema()
+                .addProperty("status", new StringSchema().example("success"))
+                .addProperty("data", new ObjectSchema()
+                    .addProperty("running", new Schema<>().type("boolean"))
+                    .addProperty("debugMode", new Schema<>().type("boolean"))
+                    .addProperty("uptime", new Schema<>().type("integer").format("int64")))
+                .addProperty("timestamp", new Schema<>().type("integer").format("int64")),
+            
+            "ServerInfo", new ObjectSchema()
+                .addProperty("serverId", new StringSchema())
+                .addProperty("name", new StringSchema())
+                .addProperty("group", new StringSchema())
+                .addProperty("status", new StringSchema().example("RUNNING"))
+                .addProperty("type", new StringSchema().example("DYNAMIC"))
+                .addProperty("address", new StringSchema())
+                .addProperty("port", new Schema<>().type("integer"))
+                .addProperty("onlinePlayers", new Schema<>().type("integer"))
+                .addProperty("maxPlayers", new Schema<>().type("integer"))
+                .addProperty("manuallyScaled", new Schema<>().type("boolean"))
+                .addProperty("createdAt", new Schema<>().type("integer").format("int64"))
+                .addProperty("lastHeartbeat", new Schema<>().type("integer").format("int64")),
+            
+            "ServerListResponse", new ObjectSchema()
+                .addProperty("status", new StringSchema().example("success"))
+                .addProperty("data", new ArraySchema().items(new Schema<>().$ref("#/components/schemas/ServerInfo")))
+                .addProperty("timestamp", new Schema<>().type("integer").format("int64")),
+            
+            "ServerResponse", new ObjectSchema()
+                .addProperty("status", new StringSchema().example("success"))
+                .addProperty("data", new Schema<>().$ref("#/components/schemas/ServerInfo"))
+                .addProperty("timestamp", new Schema<>().type("integer").format("int64")),
+            
+            "CreateServerRequest", new ObjectSchema()
+                .addProperty("group", new StringSchema().description("Group name"))
+                .addProperty("count", new Schema<>().type("integer")._default(1).description("Number of servers to create"))
+                .required(List.of("group")),
+            
+            "ScaleRequest", new ObjectSchema()
+                .addProperty("direction", new StringSchema().example("up").description("Scaling direction: 'up' or 'down'"))
+                .addProperty("count", new Schema<>().type("integer")._default(1).description("Number of servers to scale"))
+                .required(List.of("direction")),
+            
+            "GroupListResponse", new ObjectSchema()
+                .addProperty("status", new StringSchema().example("success"))
+                .addProperty("data", new ArraySchema().items(new StringSchema()))
+                .addProperty("timestamp", new Schema<>().type("integer").format("int64")),
+            
+            "ScalingResponse", new ObjectSchema()
+                .addProperty("status", new StringSchema().example("success"))
+                .addProperty("data", new ObjectSchema().additionalProperties(new ObjectSchema()
+                    .addProperty("group", new StringSchema())
+                    .addProperty("type", new StringSchema())))
+                .addProperty("timestamp", new Schema<>().type("integer").format("int64")),
+            
+            "MetricsResponse", new ObjectSchema()
+                .addProperty("status", new StringSchema().example("success"))
+                .addProperty("data", new ObjectSchema()
+                    .addProperty("totalServers", new Schema<>().type("integer"))
+                    .addProperty("totalPlayers", new Schema<>().type("integer"))
+                    .addProperty("serversByStatus", new ObjectSchema().additionalProperties(new Schema<>().type("integer"))))
+                .addProperty("timestamp", new Schema<>().type("integer").format("int64"))
+        );
+    }
+}

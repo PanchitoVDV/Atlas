@@ -1,6 +1,7 @@
 atlas:
   network:
     port: 8080
+    api-host: "127.0.0.1" # Use "0.0.0.0" to bind to all interfaces
     api-port: 9090
     api-key: "your-secure-api-key"
 

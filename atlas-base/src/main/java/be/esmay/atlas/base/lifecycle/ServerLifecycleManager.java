@@ -1,5 +1,7 @@
 package be.esmay.atlas.base.lifecycle;
 
+import be.esmay.atlas.base.AtlasBase;
+import be.esmay.atlas.base.api.dto.WebSocketMessage;
 import be.esmay.atlas.base.config.impl.ScalerConfig;
 import be.esmay.atlas.base.directory.DirectoryManager;
 import be.esmay.atlas.base.provider.ServiceProvider;
@@ -23,7 +25,7 @@ public final class ServerLifecycleManager {
     }
 
     public CompletableFuture<ServerInfo> createServer(ServiceProvider serviceProvider, ScalerConfig.Group groupConfig, String serverId, String serverName, ServerType serverType, boolean isManuallyScaled) {
-        return CompletableFuture.supplyAsync(() -> {
+        CompletableFuture<ServerInfo> supplyFuture = CompletableFuture.supplyAsync(() -> {
             String uniqueUuid = UUID.randomUUID().toString();
 
             ServerInfo server = ServerInfo.builder()
@@ -43,7 +45,8 @@ public final class ServerLifecycleManager {
             server.setWorkingDirectory(workingDirectory);
 
             return server;
-        }).thenCompose(server -> serviceProvider.createServer(groupConfig, server));
+        });
+        return supplyFuture.thenCompose(server -> serviceProvider.createServer(groupConfig, server));
     }
 
     public CompletableFuture<Void> stopServer(ServiceProvider serviceProvider, ServerInfo server, boolean isRestart) {
@@ -52,37 +55,46 @@ public final class ServerLifecycleManager {
         if (shouldDelete)
             return this.deleteServerCompletely(serviceProvider, server);
 
-        return serviceProvider.stopServer(server).thenRun(() -> Logger.debug("Stopped server (preserved): " + server.getName()));
+        CompletableFuture<Void> stopFuture = serviceProvider.stopServer(server);
+        return stopFuture.thenRun(() -> Logger.debug("Stopped server (preserved): " + server.getName()));
     }
 
     public CompletableFuture<Void> deleteServerCompletely(ServiceProvider serviceProvider, ServerInfo server) {
         boolean shouldCleanDirectory = server.getType() == ServerType.DYNAMIC;
 
-        return serviceProvider.stopServer(server)
-                .thenCompose(v -> serviceProvider.deleteServer(server.getServerId()))
-                .thenAccept(deleted -> {
-                    if (shouldCleanDirectory) {
-                        try {
-                            this.directoryManager.cleanupServerDirectory(server);
-                            Logger.debug("Deleted and cleaned server: " + server.getName());
-                        } catch (Exception e) {
-                            Logger.warn("Server deleted but directory cleanup failed for " + server.getName() + ": " + e.getMessage());
-                        }
-                    } else {
-                        Logger.debug("Deleted server (preserved directory): " + server.getName());
-                    }
-                });
+        CompletableFuture<Void> stopFuture = serviceProvider.stopServer(server);
+        CompletableFuture<Boolean> deleteFuture = stopFuture.thenCompose(v -> serviceProvider.deleteServer(server.getServerId()));
+        return deleteFuture.thenAccept(deleted -> {
+            if (shouldCleanDirectory) {
+                try {
+                    this.directoryManager.cleanupServerDirectory(server);
+                    Logger.debug("Deleted and cleaned server: " + server.getName());
+                } catch (Exception e) {
+                    Logger.warn("Server deleted but directory cleanup failed for " + server.getName() + ": " + e.getMessage());
+                }
+            } else {
+                Logger.debug("Deleted server (preserved directory): " + server.getName());
+            }
+        });
     }
 
     public CompletableFuture<Void> restartServer(ServiceProvider serviceProvider, ScalerConfig.Group groupConfig, ServerInfo server) {
         Logger.info("Restarting server: " + server.getName());
 
-        return this.stopServer(serviceProvider, server, true)
-                .thenCompose(v -> {
-                    Logger.debug("Server stopped, starting again: " + server.getName());
-                    return serviceProvider.startServer(server);
-                })
-                .thenRun(() -> Logger.info("Server restarted: " + server.getName()));
+        AtlasBase atlasInstance = AtlasBase.getInstance();
+        WebSocketMessage restartStartMessage = WebSocketMessage.event("restart-started", server.getServerId());
+        atlasInstance.getApiManager().getWebSocketManager().sendToServerConnections(server.getServerId(), restartStartMessage);
+
+        CompletableFuture<Void> stopFuture = this.stopServer(serviceProvider, server, true);
+        CompletableFuture<Void> startFuture = stopFuture.thenCompose(v -> {
+            Logger.debug("Server stopped, starting again: " + server.getName());
+            
+            atlasInstance.getApiManager().getWebSocketManager().stopLogStreamingForRestart(server.getServerId());
+            
+            return serviceProvider.startServer(server);
+        });
+
+        return startFuture.thenRun(() -> Logger.info("Server restarted: " + server.getName()));
     }
 
     public CompletableFuture<Void> startServer(ServiceProvider serviceProvider, ScalerConfig.Group groupConfig, ServerInfo server) {

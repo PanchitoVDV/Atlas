@@ -6,6 +6,7 @@ import be.esmay.atlas.base.provider.ServiceProvider;
 import be.esmay.atlas.base.utils.Logger;
 import be.esmay.atlas.common.enums.ServerStatus;
 import be.esmay.atlas.common.models.ServerInfo;
+import be.esmay.atlas.common.models.ServerStats;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.CreateContainerCmd;
@@ -20,6 +21,9 @@ import com.github.dockerjava.api.model.Network;
 import com.github.dockerjava.api.model.NetworkSettings;
 import com.github.dockerjava.api.model.PullResponseItem;
 import com.github.dockerjava.api.model.Volume;
+import com.github.dockerjava.api.model.Statistics;
+import com.github.dockerjava.api.model.StatisticNetworksConfig;
+import com.github.dockerjava.api.model.CpuStatsConfig;
 import com.github.dockerjava.core.DefaultDockerClientConfig;
 import com.github.dockerjava.core.DockerClientBuilder;
 
@@ -184,6 +188,7 @@ public final class DockerServiceProvider extends ServiceProvider {
                 serverInfo.setStatus(ServerStatus.STOPPING);
 
                 this.dockerClient.stopContainerCmd(containerId).withTimeout(30).exec();
+                this.waitForContainerStop(containerId);
 
                 serverInfo.setStatus(ServerStatus.STOPPED);
                 serverInfo.setOnlinePlayers(0);
@@ -267,6 +272,24 @@ public final class DockerServiceProvider extends ServiceProvider {
         }
 
         Logger.warn("Container {} may not be fully deleted after 10 seconds", containerId.substring(0, 12));
+    }
+
+    private void waitForContainerStop(String containerId) {
+        for (int attempt = 0; attempt < 20; attempt++) {
+            try {
+                InspectContainerResponse containerInfo = this.dockerClient.inspectContainerCmd(containerId).exec();
+                if (!containerInfo.getState().getRunning()) {
+                    Logger.debug("Container {} confirmed stopped after {} attempts", containerId.substring(0, 12), attempt + 1);
+                    return;
+                }
+                Thread.sleep(500);
+            } catch (Exception e) {
+                Logger.debug("Container {} no longer exists (stopped and removed)", containerId.substring(0, 12));
+                return;
+            }
+        }
+
+        Logger.warn("Container {} may not be fully stopped after 10 seconds", containerId.substring(0, 12));
     }
 
     private void cleanupServerVolume(String volumePath, String serverId) {
@@ -717,6 +740,100 @@ public final class DockerServiceProvider extends ServiceProvider {
         });
     }
 
+
+    @Override
+    public CompletableFuture<ServerStats> getServerStats(String serverId) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                String containerId = this.serverContainerIds.get(serverId);
+                if (containerId == null) {
+                    throw new IllegalArgumentException("Container ID not found for server: " + serverId);
+                }
+
+                final Statistics[] statsContainer = new Statistics[1];
+                
+                ResultCallback.Adapter<Statistics> callback = 
+                    new ResultCallback.Adapter<Statistics>() {
+                        @Override
+                        public void onNext(Statistics statistics) {
+                            statsContainer[0] = statistics;
+                        }
+                    };
+
+                this.dockerClient.statsCmd(containerId).exec(callback);
+                Thread.sleep(1000);
+                callback.close();
+
+                Statistics statistics = statsContainer[0];
+                if (statistics == null) {
+                    throw new RuntimeException("Failed to collect statistics for container: " + containerId);
+                }
+
+                double cpuUsage = this.calculateCpuUsage(statistics);
+                long memoryUsed = statistics.getMemoryStats().getUsage() != null ? statistics.getMemoryStats().getUsage() : 0L;
+                long memoryLimit = statistics.getMemoryStats().getLimit() != null ? statistics.getMemoryStats().getLimit() : 0L;
+                
+                Map<String, StatisticNetworksConfig> networkStats = statistics.getNetworks();
+                long networkRx = 0L;
+                long networkTx = 0L;
+                if (networkStats != null) {
+                    for (StatisticNetworksConfig net : networkStats.values()) {
+                        if (net != null) {
+                            networkRx += net.getRxBytes() != null ? net.getRxBytes() : 0L;
+                            networkTx += net.getTxBytes() != null ? net.getTxBytes() : 0L;
+                        }
+                    }
+                }
+
+                return ServerStats.builder()
+                    .cpuUsagePercent(cpuUsage)
+                    .memoryUsedBytes(memoryUsed)
+                    .memoryTotalBytes(memoryLimit)
+                    .diskUsedBytes(0L)
+                    .diskTotalBytes(0L)
+                    .networkRxBytes(networkRx)
+                    .networkTxBytes(networkTx)
+                    .timestamp(System.currentTimeMillis())
+                    .build();
+
+            } catch (Exception e) {
+                Logger.error("Error collecting Docker container stats: {}", e.getMessage());
+                throw new RuntimeException("Failed to collect container statistics", e);
+            }
+        }, this.executorService);
+    }
+
+    private double calculateCpuUsage(Statistics statistics) {
+        CpuStatsConfig cpuStats = statistics.getCpuStats();
+        CpuStatsConfig preCpuStats = statistics.getPreCpuStats();
+        
+        if (cpuStats == null || preCpuStats == null) {
+            return 0.0;
+        }
+
+        Long cpuTotal = cpuStats.getCpuUsage() != null ? cpuStats.getCpuUsage().getTotalUsage() : null;
+        Long preCpuTotal = preCpuStats.getCpuUsage() != null ? preCpuStats.getCpuUsage().getTotalUsage() : null;
+        Long systemTotal = cpuStats.getSystemCpuUsage();
+        Long preSystemTotal = preCpuStats.getSystemCpuUsage();
+
+        if (cpuTotal == null || preCpuTotal == null || systemTotal == null || preSystemTotal == null) {
+            return 0.0;
+        }
+
+        double cpuDelta = cpuTotal - preCpuTotal;
+        double systemDelta = systemTotal - preSystemTotal;
+        
+        if (systemDelta > 0.0 && cpuDelta > 0.0) {
+            Long onlineCpusLong = cpuStats.getOnlineCpus();
+            int onlineCpus = onlineCpusLong != null ? onlineCpusLong.intValue() : Runtime.getRuntime().availableProcessors();
+            if (onlineCpus == 0) {
+                onlineCpus = Runtime.getRuntime().availableProcessors();
+            }
+            return (cpuDelta / systemDelta) * onlineCpus * 100.0;
+        }
+        
+        return 0.0;
+    }
 
     @Override
     public void shutdown() {

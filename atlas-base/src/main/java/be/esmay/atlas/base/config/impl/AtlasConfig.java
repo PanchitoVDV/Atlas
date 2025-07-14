@@ -43,6 +43,9 @@ public final class AtlasConfig extends ConfigurateConfig {
 
         private int port;
 
+        @Setting("api-host")
+        private String apiHost = "127.0.0.1";
+
         @Setting("api-port")
         private int apiPort;
 
