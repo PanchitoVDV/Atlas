@@ -18,6 +18,8 @@ import java.util.stream.Collectors;
 public final class NetworkServerCacheManager {
     
     private final Map<String, ServerInfo> serverCache = new ConcurrentHashMap<>();
+
+    @Setter
     private volatile ProxyServer proxyServer;
     
     public void updateServer(ServerInfo serverInfo) {
