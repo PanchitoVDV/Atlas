@@ -56,7 +56,7 @@ public final class VelocityServerRegistryManager {
             this.proxyServer.registerServer(velocityServerInfo);
             this.managedServers.add(serverId);
 
-            AtlasVelocityPlugin.getInstance().getLogger().info("Added server to Velocity registry: {} at {}", serverId, address);
+            AtlasVelocityPlugin.getInstance().getLogger().info("Added server to Velocity registry: {} at {}", serverInfo.getName(), address);
             return;
         }
 
