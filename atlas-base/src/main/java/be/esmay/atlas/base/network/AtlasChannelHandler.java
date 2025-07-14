@@ -174,7 +174,7 @@ public final class AtlasChannelHandler extends SimpleChannelInboundHandler<Packe
         Logger.debug("Server list request received from: {}", packet.getRequesterId());
         
         List<ServerInfo> servers = this.getAllServers().stream()
-                .filter(server -> server.getGroup().equalsIgnoreCase("proxy"))
+                .filter(server -> !server.getGroup().equalsIgnoreCase("proxy"))
                 .filter(server -> server.getStatus() == ServerStatus.RUNNING)
                 .collect(Collectors.toList());
         

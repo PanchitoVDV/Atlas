@@ -22,7 +22,7 @@ public final class VelocityServerRegistryManager {
     }
 
     public void handleServerAdd(ServerInfo serverInfo) {
-        if (!this.isBackendServer(serverInfo) && serverInfo.getStatus() != ServerStatus.RUNNING)
+        if (!this.isBackendServer(serverInfo) || serverInfo.getStatus() != ServerStatus.RUNNING)
             return;
 
         this.addServerToVelocity(serverInfo);
@@ -85,7 +85,7 @@ public final class VelocityServerRegistryManager {
     }
 
     private boolean isBackendServer(ServerInfo serverInfo) {
-        return serverInfo != null && !serverInfo.getGroup().equals("proxy");
+        return serverInfo != null && !serverInfo.getGroup().equalsIgnoreCase("proxy");
     }
 
 }
