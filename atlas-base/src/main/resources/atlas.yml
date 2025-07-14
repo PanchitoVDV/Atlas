@@ -4,6 +4,13 @@ atlas:
     api-host: "127.0.0.1" # Use "0.0.0.0" to bind to all interfaces
     api-port: 9090
     api-key: "your-secure-api-key"
+    netty-key: "your-secure-netty-key"
+    bind-address: "0.0.0.0"
+    allowed-networks:
+      - "172.17.0.0/16"  # Default Docker network
+      - "10.0.0.0/8"     # Additional allowed network
+    auth-required: true
+    connection-timeout: 30
 
   database:
     type: "sqlite" # or mysql

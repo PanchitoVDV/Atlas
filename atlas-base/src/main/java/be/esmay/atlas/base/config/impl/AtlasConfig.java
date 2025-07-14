@@ -7,6 +7,7 @@ import org.spongepowered.configurate.objectmapping.ConfigSerializable;
 import org.spongepowered.configurate.objectmapping.meta.Setting;
 
 import java.io.File;
+import java.util.List;
 
 @Getter
 public final class AtlasConfig extends ConfigurateConfig {
@@ -51,6 +52,21 @@ public final class AtlasConfig extends ConfigurateConfig {
 
         @Setting("api-key")
         private String apiKey;
+        
+        @Setting("netty-key")
+        private String nettyKey;
+        
+        @Setting("bind-address")
+        private String bindAddress = "0.0.0.0";
+        
+        @Setting("allowed-networks")
+        private List<String> allowedNetworks = List.of("172.17.0.0/16", "10.0.0.0/8");
+        
+        @Setting("auth-required")
+        private boolean authRequired = true;
+        
+        @Setting("connection-timeout")
+        private int connectionTimeout = 30;
 
     }
 

@@ -33,7 +33,15 @@ public final class ServerManager {
 
         ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
 
-        return this.lifecycleManager.startServer(provider, scaler.getScalerConfig().getGroup(), server).thenRun(() -> Logger.info("Successfully started server: " + server.getName()));
+        CompletableFuture<Void> startFuture = this.lifecycleManager.startServer(provider, scaler.getScalerConfig().getGroup(), server);
+        return startFuture.thenRun(() -> {
+            Logger.info("Successfully started server: " + server.getName());
+            
+            AtlasBase atlasInstance = AtlasBase.getInstance();
+            if (atlasInstance != null && atlasInstance.getNettyServer() != null) {
+                atlasInstance.getNettyServer().broadcastServerUpdate(server);
+            }
+        });
     }
 
     public CompletableFuture<Void> stopServer(ServerInfo server) {
@@ -55,6 +63,10 @@ public final class ServerManager {
             atlasInstance.getApiManager().getWebSocketManager().disconnectServerConnections(
                 server.getServerId(), "Server was stopped"
             );
+            
+            if (atlasInstance.getNettyServer() != null) {
+                atlasInstance.getNettyServer().broadcastServerUpdate(server);
+            }
         });
 
     }
@@ -76,6 +88,10 @@ public final class ServerManager {
             atlasInstance.getApiManager().getWebSocketManager().sendToServerConnections(server.getServerId(), restartMessage);
             
             atlasInstance.getApiManager().getWebSocketManager().restartLogStreamingForServer(server.getServerId());
+            
+            if (atlasInstance.getNettyServer() != null) {
+                atlasInstance.getNettyServer().broadcastServerUpdate(server);
+            }
         });
     }
 
@@ -93,6 +109,10 @@ public final class ServerManager {
                 atlasInstance.getApiManager().getWebSocketManager().disconnectServerConnections(
                     server.getServerId(), "Server was removed"
                 );
+                
+                if (atlasInstance.getNettyServer() != null) {
+                    atlasInstance.getNettyServer().broadcastServerRemove(server.getServerId(), "Server was removed");
+                }
             });
         } else {
             CompletableFuture<Void> removeFuture = scaler.removeAsync(server);
@@ -102,6 +122,10 @@ public final class ServerManager {
                 atlasInstance.getApiManager().getWebSocketManager().disconnectServerConnections(
                     server.getServerId(), "Server was removed"
                 );
+                
+                if (atlasInstance.getNettyServer() != null) {
+                    atlasInstance.getNettyServer().broadcastServerRemove(server.getServerId(), "Server was removed");
+                }
             });
         }
     }

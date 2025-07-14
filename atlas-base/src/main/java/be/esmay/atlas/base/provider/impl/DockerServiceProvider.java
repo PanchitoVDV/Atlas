@@ -1,5 +1,6 @@
 package be.esmay.atlas.base.provider.impl;
 
+import be.esmay.atlas.base.AtlasBase;
 import be.esmay.atlas.base.config.impl.AtlasConfig;
 import be.esmay.atlas.base.config.impl.ScalerConfig;
 import be.esmay.atlas.base.provider.ServiceProvider;
@@ -492,6 +493,14 @@ public final class DockerServiceProvider extends ServiceProvider {
             envVars.add("SERVER_UUID=" + serverInfo.getServerId());
             envVars.add("ATLAS_MANAGED=true");
             envVars.add("SERVER_TYPE=" + groupConfig.getServer().getType());
+            
+            AtlasBase atlasInstance = AtlasBase.getInstance();
+            if (atlasInstance != null && atlasInstance.getConfigManager() != null) {
+                AtlasConfig.Network networkConfig = atlasInstance.getConfigManager().getAtlasConfig().getAtlas().getNetwork();
+                envVars.add("ATLAS_HOST=atlas-base");
+                envVars.add("ATLAS_PORT=" + networkConfig.getPort());
+                envVars.add("ATLAS_NETTY_KEY=" + networkConfig.getNettyKey());
+            }
 
             if (dockerGroupConfig.getEnvironment() != null) {
                 dockerGroupConfig.getEnvironment().forEach((key, value) ->

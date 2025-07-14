@@ -17,6 +17,9 @@ dependencies {
     implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.16.1")
     implementation("io.swagger.core.v3:swagger-annotations:2.2.19")
     implementation("io.swagger.core.v3:swagger-core:2.2.19")
+    
+    implementation("io.netty:netty-all:4.1.100.Final")
+    implementation("com.google.code.gson:gson:2.10.1")
 }
 
 tasks.withType<Jar> {

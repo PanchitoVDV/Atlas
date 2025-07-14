@@ -4,6 +4,7 @@ import be.esmay.atlas.base.api.ApiManager;
 import be.esmay.atlas.base.commands.CommandManager;
 import be.esmay.atlas.base.config.ConfigManager;
 import be.esmay.atlas.base.lifecycle.ServerLifecycleManager;
+import be.esmay.atlas.base.network.NettyServer;
 import be.esmay.atlas.base.provider.ProviderManager;
 import be.esmay.atlas.base.scaler.ScalerManager;
 import be.esmay.atlas.base.server.ServerManager;
@@ -31,6 +32,7 @@ public final class AtlasBase {
     private final CommandManager commandManager;
     private final ServerManager serverManager;
     private final ApiManager apiManager;
+    private NettyServer nettyServer;
 
     private volatile boolean running = false;
     private volatile boolean debugMode = false;
@@ -65,10 +67,12 @@ public final class AtlasBase {
 
                 this.createRequiredDirectories();
                 this.configManager.initialize();
+                this.nettyServer = new NettyServer(this.configManager.getAtlasConfig().getAtlas().getNetwork());
                 this.providerManager.initialize(this.configManager.getAtlasConfig());
                 this.scalerManager.initialize();
                 this.commandManager.initialize();
                 this.apiManager.start();
+                this.nettyServer.start();
 
                 this.running = true;
                 Logger.info("Atlas is now running and ready to use.");
@@ -90,6 +94,9 @@ public final class AtlasBase {
 
             try {
                 this.shutdownExecutorService();
+
+                if (this.nettyServer != null)
+                    this.nettyServer.shutdown();
 
                 if (this.apiManager != null)
                     this.apiManager.stop();

@@ -393,6 +393,11 @@ public abstract class Scaler {
 
     public void addServer(ServerInfo server) {
         this.servers.put(server.getServerId(), server);
+        
+        AtlasBase atlasInstance = AtlasBase.getInstance();
+        if (atlasInstance != null && atlasInstance.getNettyServer() != null) {
+            atlasInstance.getNettyServer().broadcastServerAdd(server);
+        }
     }
 
     public void updateServerPlayerCount(String serverId, int playerCount) {
