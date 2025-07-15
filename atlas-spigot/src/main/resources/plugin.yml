@@ -1,0 +1,6 @@
+name: AtlasSpigot
+version: 1.0.0
+main: be.esmay.atlas.spigot.AtlasSpigotPlugin
+api-version: 1.21
+author: Esmay
+description: Atlas network client for Spigot servers

@@ -4,6 +4,7 @@ import be.esmay.atlas.base.AtlasBase;
 import be.esmay.atlas.base.config.impl.ScalerConfig;
 import be.esmay.atlas.base.lifecycle.ServerLifecycleManager;
 import be.esmay.atlas.base.lifecycle.ServerLifecycleService;
+import be.esmay.atlas.base.provider.DeletionOptions;
 import be.esmay.atlas.base.provider.ServiceProvider;
 import be.esmay.atlas.base.utils.Logger;
 import be.esmay.atlas.common.enums.ScaleType;
@@ -33,6 +34,7 @@ public abstract class Scaler {
     protected final ServerLifecycleManager lifecycleManager;
     protected final ServerLifecycleService lifecycleService;
     protected final Map<String, AtlasServer> servers = new ConcurrentHashMap<>();
+    protected final Set<String> pendingRemovals = ConcurrentHashMap.newKeySet();
 
     protected volatile boolean shutdown = false;
     protected volatile boolean paused = false;
@@ -71,6 +73,12 @@ public abstract class Scaler {
 
         if (this.paused) {
             Logger.debug("Scaling is paused for group: {}", this.groupName);
+            return;
+        }
+
+        if (!this.pendingRemovals.isEmpty()) {
+            Logger.debug("Waiting for {} pending removals to complete before scaling group: {}", 
+                    this.pendingRemovals.size(), this.groupName);
             return;
         }
 
@@ -269,10 +277,16 @@ public abstract class Scaler {
         if (server == null || !this.servers.containsKey(server.getServerId()))
             return;
 
-        this.lifecycleService.removeServer(server).thenRun(() -> {
-            Logger.debug("Completed removal of server: {}", server.getName());
+        String serverId = server.getServerId();
+        this.pendingRemovals.add(serverId);
+        Logger.debug("Added server {} to pending removals", serverId);
+
+        this.lifecycleService.removeServer(server, DeletionOptions.scalingDown()).thenRun(() -> {
+            this.pendingRemovals.remove(serverId);
+            Logger.debug("Completed scaling removal of server: {} (removed from pending)", server.getName());
         }).exceptionally(throwable -> {
-            Logger.error("Failed to remove server {}", server.getName(), throwable);
+            this.pendingRemovals.remove(serverId);
+            Logger.error("Failed to remove server {} during scaling (removed from pending)", server.getName(), throwable);
             return null;
         });
     }
@@ -282,12 +296,29 @@ public abstract class Scaler {
             return CompletableFuture.completedFuture(null);
         }
 
-        return this.lifecycleService.removeServer(server);
+        String serverId = server.getServerId();
+        this.pendingRemovals.add(serverId);
+        Logger.debug("Added server {} to pending removals (async)", serverId);
+
+        return this.lifecycleService.removeServer(server, DeletionOptions.scalingDown()).thenRun(() -> {
+            this.pendingRemovals.remove(serverId);
+            Logger.debug("Completed async scaling removal of server: {} (removed from pending)", server.getName());
+        }).exceptionally(throwable -> {
+            this.pendingRemovals.remove(serverId);
+            Logger.error("Failed to remove server {} async during scaling (removed from pending)", server.getName(), throwable);
+            return null;
+        });
     }
 
     private CompletableFuture<Void> shutdownServer(AtlasServer server) {
-        CompletableFuture<Void> deleteFuture = this.lifecycleManager.deleteServerCompletely(this.serviceProvider, server);
-        CompletableFuture<Void> completionFuture = deleteFuture.thenRun(() -> Logger.debug("Successfully removed server: {}", server.getName()));
+        CompletableFuture<Boolean> deleteFuture = this.serviceProvider.deleteServerCompletely(server, DeletionOptions.systemShutdown());
+        CompletableFuture<Void> completionFuture = deleteFuture.thenAccept(success -> {
+            if (success) {
+                Logger.debug("Successfully removed server during shutdown: {}", server.getName());
+            } else {
+                Logger.warn("Failed to remove server during shutdown: {}", server.getName());
+            }
+        });
         return completionFuture.exceptionally(throwable -> {
             Logger.error("Failed to shutdown server: {}", server.getName(), throwable);
             return null;
@@ -304,6 +335,8 @@ public abstract class Scaler {
 
     public void removeServerFromTracking(String serverId) {
         this.servers.remove(serverId);
+        this.pendingRemovals.remove(serverId);
+        Logger.debug("Removed server {} from tracking and pending removals", serverId);
     }
 
     public List<AtlasServer> getAutoScaledServers() {
@@ -603,8 +636,40 @@ public abstract class Scaler {
         }
 
         for (AtlasServer server : serversToRemove) {
-            this.remove(server);
+            // Use connection lost options for heartbeat timeouts
+            String serverId = server.getServerId();
+            this.pendingRemovals.add(serverId);
+            
+            this.lifecycleService.removeServer(server, DeletionOptions.connectionLost()).thenRun(() -> {
+                this.pendingRemovals.remove(serverId);
+                Logger.debug("Completed heartbeat timeout removal of server: {} (removed from pending)", server.getName());
+            }).exceptionally(throwable -> {
+                this.pendingRemovals.remove(serverId);
+                Logger.error("Failed to remove server {} after heartbeat timeout (removed from pending)", server.getName(), throwable);
+                return null;
+            });
         }
+
+        // Validate server state to detect and clean up zombie servers
+        this.serviceProvider.validateServerState();
+    }
+
+    public boolean hasPendingRemovals() {
+        return !this.pendingRemovals.isEmpty();
+    }
+
+    public int getPendingRemovalCount() {
+        return this.pendingRemovals.size();
+    }
+
+    public void clearPendingRemovals() {
+        this.pendingRemovals.clear();
+        Logger.debug("Cleared all pending removals for group: {}", this.groupName);
+    }
+
+    public void validateAndCleanupZombieServers() {
+        Logger.debug("Running manual zombie server validation for group: {}", this.groupName);
+        this.serviceProvider.validateServerState();
     }
 
 }

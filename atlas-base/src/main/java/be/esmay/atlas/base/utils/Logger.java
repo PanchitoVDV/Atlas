@@ -4,11 +4,22 @@ import lombok.experimental.UtilityClass;
 import org.jline.reader.LineReader;
 import org.jline.terminal.Terminal;
 
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -18,6 +29,18 @@ public final class Logger {
     private static boolean DEBUG_MODE = false;
     private static Terminal TERMINAL = null;
     private static LineReader LINE_READER = null;
+    private static FileWriter LOG_FILE_WRITER = null;
+    
+    private static final ExecutorService LOG_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "Atlas-Logger");
+        t.setDaemon(true);
+        return t;
+    });
+    
+    private static final BlockingQueue<LogEntry> LOG_QUEUE = new ArrayBlockingQueue<>(1000);
+    private static volatile boolean LOGGING_ACTIVE = true;
+    
+    private record LogEntry(String icon, String color, String message, Throwable throwable) {}
 
     private static final String RESET = "\u001B[0m";
     private static final String RED = "\u001B[31m";
@@ -35,6 +58,10 @@ public final class Logger {
 
     private static final DateTimeFormatter TIME_FORMAT =
             DateTimeFormatter.ofPattern("HH:mm:ss");
+    private static final DateTimeFormatter FILE_TIME_FORMAT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
+    private static final DateTimeFormatter LOG_FILE_DATE_FORMAT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
 
     private static final String[] GRADIENT_COLORS = {
             "\u001B[38;2;0;130;255m",
@@ -49,6 +76,95 @@ public final class Logger {
     private static final boolean IS_WINDOWS = System.getProperty("os.name").toLowerCase().contains("win");
     private static final boolean IS_LINUX = System.getProperty("os.name").toLowerCase().contains("linux");
     private static final String VERSION = getProjectVersion();
+
+    static {
+        rotateLogFile();
+        initializeLogFile();
+        startAsyncLogging();
+    }
+    
+    private static void startAsyncLogging() {
+        LOG_EXECUTOR.submit(() -> {
+            while (LOGGING_ACTIVE || !LOG_QUEUE.isEmpty()) {
+                try {
+                    LogEntry entry = LOG_QUEUE.poll(1, TimeUnit.SECONDS);
+                    if (entry != null) {
+                        processLogEntry(entry);
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                } catch (Exception e) {
+                    System.err.println("Error in async logging: " + e.getMessage());
+                }
+            }
+        });
+    }
+
+    private static void rotateLogFile() {
+        try {
+            Path currentLogFile = Paths.get("log.log");
+            Path logsDir = Paths.get("logs");
+
+            if (!Files.exists(logsDir)) {
+                Files.createDirectories(logsDir);
+            }
+
+            if (Files.exists(currentLogFile)) {
+                String timestamp = LocalDateTime.now().format(LOG_FILE_DATE_FORMAT);
+                Path rotatedFile = logsDir.resolve("atlas-" + timestamp + ".log");
+                
+                try {
+                    Files.move(currentLogFile, rotatedFile);
+                } catch (IOException e) {
+                    System.err.println("Failed to rotate log file: " + e.getMessage());
+                }
+            }
+
+            cleanupOldLogFiles(logsDir);
+        } catch (IOException e) {
+            System.err.println("Failed to setup log rotation: " + e.getMessage());
+        }
+    }
+    
+    private static void cleanupOldLogFiles(Path logsDir) {
+        try {
+            if (!Files.exists(logsDir)) {
+                return;
+            }
+            
+            LocalDateTime cutoffDate = LocalDateTime.now().minusDays(30);
+            
+            Files.list(logsDir)
+                .filter(Files::isRegularFile)
+                .filter(path -> path.getFileName().toString().startsWith("atlas-"))
+                .filter(path -> path.getFileName().toString().endsWith(".log"))
+                .forEach(path -> {
+                    try {
+                        LocalDateTime fileTime = Files.getLastModifiedTime(path).toInstant()
+                                .atZone(java.time.ZoneId.systemDefault()).toLocalDateTime();
+                        
+                        if (fileTime.isBefore(cutoffDate)) {
+                            Files.delete(path);
+                            System.out.println("Deleted old log file: " + path.getFileName());
+                        }
+                    } catch (IOException e) {
+                        System.err.println("Failed to check/delete log file " + path.getFileName() + ": " + e.getMessage());
+                    }
+                });
+                
+        } catch (IOException e) {
+            System.err.println("Failed to cleanup old log files: " + e.getMessage());
+        }
+    }
+
+    private static void initializeLogFile() {
+        try {
+            LOG_FILE_WRITER = new FileWriter("log.log", true);
+        } catch (IOException e) {
+            System.err.println("Failed to initialize log file: " + e.getMessage());
+        }
+    }
 
     private static String getProjectVersion() {
         try {
@@ -236,58 +352,78 @@ public final class Logger {
         }
     }
 
-    private static void log(String icon, String color, String message) {
-        synchronized (Logger.class) {
-            String logLine;
-            String timestamp = LocalTime.now().format(TIME_FORMAT);
-            if (IS_WINDOWS) {
-                logLine = String.format("[%s] %s %s", timestamp, "[INFO]", message);
-            } else {
-                logLine = String.format(
-                        "%s%s%s %s%s%s %s%s%s",
-                        DIM, timestamp, RESET,
-                        BOLD, color, icon, RESET,
-                        BRIGHT_WHITE, message
-                );
-            }
-
-            if (LINE_READER != null) {
-                LINE_READER.printAbove(logLine);
-            } else if (TERMINAL != null) {
-                TERMINAL.writer().println(logLine);
-                TERMINAL.writer().flush();
-            } else {
-                System.out.println(logLine);
+    private static void writeToFile(String level, String message, Throwable t) {
+        if (LOG_FILE_WRITER != null) {
+            try {
+                String timestamp = LocalDateTime.now().format(FILE_TIME_FORMAT);
+                String logLine = String.format("%s [%s] %s - %s%n", timestamp, Thread.currentThread().getName(), level, message);
+                LOG_FILE_WRITER.write(logLine);
+                
+                if (t != null) {
+                    PrintWriter pw = new PrintWriter(LOG_FILE_WRITER);
+                    t.printStackTrace(pw);
+                    pw.flush();
+                }
+                
+                LOG_FILE_WRITER.flush();
+            } catch (IOException e) {
+                // Don't use Logger here to avoid infinite recursion
+                System.err.println("Failed to write to log file: " + e.getMessage());
             }
         }
     }
 
-    private static void log(String icon, String color, String message, Throwable t) {
-        synchronized (Logger.class) {
-            String logLine;
-            String timestamp = LocalTime.now().format(TIME_FORMAT);
-            if (IS_WINDOWS) {
-                logLine = String.format("[%s] %s %s", timestamp, "[ERROR]", message);
-            } else {
-                logLine = String.format(
-                        "%s%s%s %s%s%s %s%s%s",
-                        DIM, timestamp, RESET,
-                        BOLD, color, icon, RESET,
-                        BRIGHT_WHITE, message
-                );
-            }
+    private static void log(String icon, String color, String message) {
+        LogEntry entry = new LogEntry(icon, color, message, null);
+        if (!LOG_QUEUE.offer(entry)) {
+            processLogEntry(entry);
+        }
+    }
 
+    private static String getLogLevel(String color) {
+        return switch (color) {
+            case BLUE -> "INFO";
+            case GREEN -> "SUCCESS";
+            case YELLOW -> "WARN";
+            case RED -> "ERROR";
+            case PURPLE -> "DEBUG";
+            default -> "INFO";
+        };
+    }
+
+    private static void log(String icon, String color, String message, Throwable t) {
+        LogEntry entry = new LogEntry(icon, color, message, t);
+        if (!LOG_QUEUE.offer(entry)) {
+            processLogEntry(entry);
+        }
+    }
+    
+    private static void processLogEntry(LogEntry entry) {
+        String logLine;
+        String timestamp = LocalTime.now().format(TIME_FORMAT);
+        if (IS_WINDOWS) {
+            logLine = String.format("[%s] %s %s", timestamp, "[INFO]", entry.message);
+        } else {
+            logLine = String.format(
+                    "%s%s%s %s%s%s %s%s%s",
+                    DIM, timestamp, RESET,
+                    BOLD, entry.color, entry.icon, RESET,
+                    BRIGHT_WHITE, entry.message
+            );
+        }
+
+        synchronized (Logger.class) {
             if (LINE_READER != null) {
                 LINE_READER.printAbove(logLine);
 
-                if (t != null) {
+                if (entry.throwable != null) {
                     if (IS_WINDOWS) {
-                        LINE_READER.printAbove("    Exception: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+                        LINE_READER.printAbove("    Exception: " + entry.throwable.getClass().getSimpleName() + ": " + entry.throwable.getMessage());
                     } else {
-                        LINE_READER.printAbove(DIM + "  ┌─ " + t.getClass().getSimpleName() + ": " +
-                                BRIGHT_RED + t.getMessage() + RESET);
+                        LINE_READER.printAbove(DIM + "  ┌─ " + entry.throwable.getClass().getSimpleName() + ": " +
+                                BRIGHT_RED + entry.throwable.getMessage() + RESET);
 
-                        StackTraceElement[] elements = t.getStackTrace();
+                        StackTraceElement[] elements = entry.throwable.getStackTrace();
                         int linesToShow = Math.min(elements.length, 3);
 
                         for (int i = 0; i < linesToShow; i++) {
@@ -312,14 +448,14 @@ public final class Logger {
                 }
             } else if (TERMINAL != null) {
                 TERMINAL.writer().println(logLine);
-                if (t != null) {
+                if (entry.throwable != null) {
                     if (IS_WINDOWS) {
-                        TERMINAL.writer().println("    Exception: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+                        TERMINAL.writer().println("    Exception: " + entry.throwable.getClass().getSimpleName() + ": " + entry.throwable.getMessage());
                     } else {
-                        TERMINAL.writer().println(DIM + "  ┌─ " + t.getClass().getSimpleName() + ": " +
-                                BRIGHT_RED + t.getMessage() + RESET);
+                        TERMINAL.writer().println(DIM + "  ┌─ " + entry.throwable.getClass().getSimpleName() + ": " +
+                                BRIGHT_RED + entry.throwable.getMessage() + RESET);
 
-                        StackTraceElement[] elements = t.getStackTrace();
+                        StackTraceElement[] elements = entry.throwable.getStackTrace();
                         int linesToShow = Math.min(elements.length, 3);
 
                         for (int i = 0; i < linesToShow; i++) {
@@ -345,14 +481,14 @@ public final class Logger {
                 TERMINAL.writer().flush();
             } else {
                 System.out.println(logLine);
-                if (t != null) {
+                if (entry.throwable != null) {
                     if (IS_WINDOWS) {
-                        System.out.println("    Exception: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+                        System.out.println("    Exception: " + entry.throwable.getClass().getSimpleName() + ": " + entry.throwable.getMessage());
                     } else {
-                        System.out.println(DIM + "  ┌─ " + t.getClass().getSimpleName() + ": " +
-                                BRIGHT_RED + t.getMessage() + RESET);
+                        System.out.println(DIM + "  ┌─ " + entry.throwable.getClass().getSimpleName() + ": " +
+                                BRIGHT_RED + entry.throwable.getMessage() + RESET);
 
-                        StackTraceElement[] elements = t.getStackTrace();
+                        StackTraceElement[] elements = entry.throwable.getStackTrace();
                         int linesToShow = Math.min(elements.length, 3);
 
                         for (int i = 0; i < linesToShow; i++) {
@@ -377,6 +513,9 @@ public final class Logger {
                 }
             }
         }
+
+        String level = getLogLevel(entry.color);
+        writeToFile(level, entry.message, entry.throwable);
     }
 
     private static String format(String message, Object... args) {
@@ -426,5 +565,28 @@ public final class Logger {
 
     public static void setLineReader(LineReader lineReader) {
         LINE_READER = lineReader;
+    }
+
+    public static void closeLogFile() {
+        LOGGING_ACTIVE = false;
+        LOG_EXECUTOR.shutdown();
+        try {
+            if (!LOG_EXECUTOR.awaitTermination(5, TimeUnit.SECONDS)) {
+                LOG_EXECUTOR.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            LOG_EXECUTOR.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+        
+        if (LOG_FILE_WRITER != null) {
+            try {
+                LOG_FILE_WRITER.close();
+            } catch (IOException e) {
+                System.err.println("Failed to close log file: " + e.getMessage());
+            }
+        }
+        
+        rotateLogFile();
     }
 }

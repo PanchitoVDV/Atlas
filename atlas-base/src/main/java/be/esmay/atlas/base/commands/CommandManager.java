@@ -15,12 +15,18 @@ import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
 
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 public final class CommandManager {
@@ -40,9 +46,9 @@ public final class CommandManager {
     private final Map<String, AtlasCommand> primaryCommands = new LinkedHashMap<>();
     private volatile boolean running = false;
     private Thread commandThread;
-    private volatile boolean waitingForInput = false;
     private Terminal terminal;
     private LineReader lineReader;
+    private ExecutorService commandExecutor;
 
     public void initialize() {
         Logger.info("Enabling command manager...");
@@ -70,6 +76,8 @@ public final class CommandManager {
 
             Logger.setTerminal(this.terminal);
             Logger.setLineReader(this.lineReader);
+            
+            this.commandExecutor = Executors.newVirtualThreadPerTaskExecutor();
         } catch (IOException e) {
             Logger.error("Failed to initialize terminal", e);
             return;
@@ -85,11 +93,27 @@ public final class CommandManager {
     public void shutdown() {
         this.running = false;
 
+        if (this.commandExecutor != null) {
+            this.commandExecutor.shutdown();
+            try {
+                if (!this.commandExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    this.commandExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                this.commandExecutor.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
+
         if (this.terminal != null) {
             try {
                 this.terminal.close();
             } catch (IOException e) {
-                Logger.error("Error closing terminal", e);
+                if (e instanceof InterruptedIOException) {
+                    Logger.debug("Terminal close interrupted during shutdown (expected)");
+                } else {
+                    Logger.error("Error closing terminal", e);
+                }
             }
         }
 
@@ -114,10 +138,7 @@ public final class CommandManager {
     private void handleInput() {
         while (this.running && !Thread.currentThread().isInterrupted()) {
             try {
-                this.waitingForInput = true;
-
                 String input = this.lineReader.readLine(this.getPromptString());
-                this.waitingForInput = false;
 
                 if (input == null)
                     break;
@@ -128,7 +149,6 @@ public final class CommandManager {
 
                 this.processCommand(input);
             } catch (Exception e) {
-                this.waitingForInput = false;
                 if (!Thread.currentThread().isInterrupted())
                     Logger.error("Command handling error", e);
 
@@ -155,18 +175,29 @@ public final class CommandManager {
             return;
         }
 
-
         AtlasCommand command = this.commands.get(commandName);
         if (command == null) {
             this.showCommandNotFound(commandName);
             return;
         }
 
-        try {
-            command.execute(args);
-        } catch (Exception e) {
-            Logger.error("Command '{}' execution failed", e, commandName);
-        }
+        CompletableFuture<Void> commandFuture = CompletableFuture.runAsync(() -> {
+            try {
+                command.execute(args);
+            } catch (Exception e) {
+                Logger.error("Command '{}' execution failed", e, commandName);
+            }
+        }, this.commandExecutor);
+
+        commandFuture.orTimeout(30, TimeUnit.SECONDS)
+                .exceptionally(throwable -> {
+                    if (throwable instanceof TimeoutException) {
+                        Logger.warn("Command '{}' timed out after 30 seconds", commandName);
+                    } else {
+                        Logger.error("Command '{}' failed with unexpected error", throwable, commandName);
+                    }
+                    return null;
+                });
     }
 
     private void showHelp(String[] args) {

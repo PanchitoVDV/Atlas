@@ -4,6 +4,8 @@ import be.esmay.atlas.base.AtlasBase;
 import be.esmay.atlas.base.config.impl.AtlasConfig;
 import be.esmay.atlas.base.config.impl.ScalerConfig;
 import be.esmay.atlas.base.directory.DirectoryManager;
+import be.esmay.atlas.base.provider.DeletionOptions;
+import be.esmay.atlas.base.provider.DeletionReason;
 import be.esmay.atlas.base.provider.ServiceProvider;
 import be.esmay.atlas.base.utils.Logger;
 import be.esmay.atlas.common.enums.ServerStatus;
@@ -71,6 +73,8 @@ public final class DockerServiceProvider extends ServiceProvider {
     private final ExecutorService executorService;
 
     private final Set<Integer> usedProxyPorts;
+    private final Map<String, Integer> serverNameToPort;
+    private final Map<String, Integer> serverIdToPort;
     private static final int PROXY_PORT_START = 25565;
 
     private static final Map<String, CompletableFuture<Void>> IMAGE_PULL_FUTURES = new ConcurrentHashMap<>();
@@ -86,6 +90,8 @@ public final class DockerServiceProvider extends ServiceProvider {
         this.logStreamConnections = new ConcurrentHashMap<>();
         this.logSubscribers = new ConcurrentHashMap<>();
         this.usedProxyPorts = ConcurrentHashMap.newKeySet();
+        this.serverNameToPort = new ConcurrentHashMap<>();
+        this.serverIdToPort = new ConcurrentHashMap<>();
         this.executorService = Executors.newCachedThreadPool(r -> {
             Thread thread = new Thread(r, "Docker-Provider");
             thread.setDaemon(true);
@@ -183,6 +189,17 @@ public final class DockerServiceProvider extends ServiceProvider {
                 InspectContainerResponse containerInfo = this.dockerClient.inspectContainerCmd(containerId).exec();
                 String ipAddress = this.getContainerIpAddress(containerInfo);
 
+                int serverPort = 25565;
+                if (this.isProxyServer(atlasServer.getGroup())) {
+                    ipAddress = this.cachedHostIp;
+                    Integer hostPort = this.serverIdToPort.get(atlasServer.getServerId());
+                    if (hostPort != null) {
+                        serverPort = hostPort;
+                    }
+
+                    Logger.debug("Using public IP and port for proxy server {}: {}:{}", atlasServer.getName(), ipAddress, serverPort);
+                }
+
                 ServerInfo serverInfo = ServerInfo.builder()
                         .status(ServerStatus.STARTING)
                         .onlinePlayers(0)
@@ -196,7 +213,7 @@ public final class DockerServiceProvider extends ServiceProvider {
                         .group(atlasServer.getGroup())
                         .workingDirectory(atlasServer.getWorkingDirectory())
                         .address(ipAddress)
-                        .port(25565)
+                        .port(serverPort)
                         .type(atlasServer.getType())
                         .createdAt(atlasServer.getCreatedAt())
                         .serviceProviderId(containerId)
@@ -242,113 +259,240 @@ public final class DockerServiceProvider extends ServiceProvider {
 
     @Override
     public CompletableFuture<Void> stopServer(AtlasServer atlasServer) {
-        return CompletableFuture.runAsync(() -> {
-            try {
-                String containerId = this.serverContainerIds.get(atlasServer.getServerId());
-                if (containerId == null) {
-                    Logger.warn("Container ID not found for server: {}", atlasServer.getServerId());
-                    return;
-                }
+        DeletionOptions stopOptions = DeletionOptions.builder()
+                .reason(DeletionReason.USER_COMMAND)
+                .gracefulStop(true)
+                .cleanupDirectory(false)
+                .removeFromTracking(false)
+                .build();
 
-                if (atlasServer.getServerInfo() != null) {
-                    atlasServer.getServerInfo().setStatus(ServerStatus.STOPPING);
-                }
-
-                this.dockerClient.stopContainerCmd(containerId).withTimeout(30).exec();
-                this.waitForContainerStop(containerId);
-
-                if (atlasServer.getServerInfo() != null) {
-                    atlasServer.getServerInfo().setStatus(ServerStatus.STOPPED);
-                    atlasServer.getServerInfo().setOnlinePlayers(0);
-                    atlasServer.getServerInfo().setOnlinePlayerNames(new HashSet<>());
-                }
-
-                Logger.debug("Stopped Docker container: {}", containerId);
-            } catch (Exception e) {
-                Logger.error("Error stopping Docker server: {}", e.getMessage());
-            }
-        }, this.executorService);
+        return this.deleteServerCompletely(atlasServer, stopOptions)
+                .thenAccept(success -> {
+                    if (!success) {
+                        throw new RuntimeException("Failed to stop server through unified deletion: " + atlasServer.getName());
+                    }
+                });
     }
 
     @Override
     public CompletableFuture<Boolean> deleteServer(String serverId) {
+        AtlasServer server = this.servers.get(serverId);
+        if (server == null) {
+            Logger.warn("Server not found for deletion: {}, cleaning up any remaining traces", serverId);
+            this.cleanupServerTracking(serverId);
+            return CompletableFuture.completedFuture(true);
+        }
+
+        return this.deleteServerCompletely(server, DeletionOptions.userCommand());
+    }
+
+    @Override
+    public CompletableFuture<Boolean> deleteServerCompletely(AtlasServer server, DeletionOptions options) {
+        if (server == null) {
+            Logger.warn("Cannot delete null server");
+            return CompletableFuture.completedFuture(false);
+        }
+
+        Logger.info("Starting deletion for server: {} (reason: {}, graceful: {})",
+                server.getName(), options.getReason(), options.isGracefulStop());
+
         return CompletableFuture.supplyAsync(() -> {
             try {
-                String containerId = this.serverContainerIds.get(serverId);
-                if (containerId == null) {
-                    Logger.warn("Container ID not found for server: {}", serverId);
-                    return false;
-                }
-
-                AtlasServer serverInfo = this.servers.get(serverId);
-                if (serverInfo == null) {
-                    Logger.warn("Server info not found for server: {}", serverId);
-                    return false;
-                }
-
-                if (serverInfo.isShutdown()) {
-                    Logger.debug("Server {} is already being deleted, skipping duplicate deletion", serverId);
-                    return true;
-                }
-
-                serverInfo.setShutdown(true);
-                Logger.debug("Marked server {} as shutting down", serverId);
-
-                Closeable logConnection = this.logStreamConnections.remove(serverId);
-                if (logConnection != null) {
-                    try {
-                        logConnection.close();
-                    } catch (IOException e) {
-                        Logger.warn("Error closing log stream: {}", e.getMessage());
-                    }
-                }
-
-                boolean isDynamic = false;
-                String volumePath = null;
-                try {
-                    InspectContainerResponse containerInfo = this.dockerClient.inspectContainerCmd(containerId).exec();
-                    Map<String, String> labels = containerInfo.getConfig().getLabels();
-                    String dynamicLabel = labels == null ? null : labels.get("atlas.dynamic");
-                    isDynamic = dynamicLabel != null && dynamicLabel.equals("true");
-
-                    if (isDynamic && serverInfo.getWorkingDirectory() != null) {
-                        volumePath = serverInfo.getWorkingDirectory();
-                        if (!volumePath.startsWith("/")) {
-                            volumePath = System.getProperty("user.dir") + "/" + volumePath;
-                        }
-                    }
-
-                    if (this.isProxyServer(serverInfo.getGroup())) {
-                        this.releaseProxyPortForContainer(containerId);
-                    }
-
-                    if (Boolean.TRUE.equals(containerInfo.getState().getRunning())) {
-                        Logger.debug("Stopping container {} before removal", containerId.substring(0, 12));
-                        this.dockerClient.stopContainerCmd(containerId).exec();
-                        this.waitForContainerStop(containerId);
-                    }
-                } catch (Exception e) {
-                    Logger.debug("Could not inspect container for cleanup info: {}", e.getMessage());
-                }
-
-                this.dockerClient.removeContainerCmd(containerId).withForce(true).exec();
-                this.waitForContainerDeletion(containerId);
-
-                if (isDynamic && volumePath != null) {
-                    this.cleanupServerVolume(volumePath, serverId);
-                }
-
-                this.servers.remove(serverId);
-                this.serverContainerIds.remove(serverId);
-                this.logSubscribers.remove(serverId);
-
-                Logger.debug("Deleted Docker container: {} (Server: {})", containerId, serverId);
-                return true;
+                return this.performUnifiedDeletion(server, options);
             } catch (Exception e) {
-                Logger.error("Error deleting Docker server: {}", e.getMessage());
-                return false;
+                Logger.error("Unified deletion failed for server: {}", server.getName(), e);
+
+                if (options.isRemoveFromTracking()) {
+                    this.cleanupServerTracking(server.getServerId());
+                }
+
+                return options.getReason() == DeletionReason.ERROR_RECOVERY;
             }
         }, this.executorService);
+    }
+
+    private boolean performUnifiedDeletion(AtlasServer server, DeletionOptions options) throws Exception {
+        String serverId = server.getServerId();
+        String containerName = server.getName();
+
+        Logger.debug("Starting deletion process for server: {} ({})", containerName, serverId);
+
+        boolean wasAlreadyShutdown = server.isShutdown();
+        if (wasAlreadyShutdown && options.getReason() != DeletionReason.ERROR_RECOVERY) {
+            Logger.warn("Server {} already marked as shutdown, but proceeding with deletion", containerName);
+        }
+        server.setShutdown(true);
+
+        this.releaseServerPort(server);
+        this.closeServerStreams(serverId);
+
+        DeletionContext context = this.prepareDeletionContext(server, options);
+
+        if (options.isGracefulStop() && context.containerExists) {
+            this.stopContainerGracefully(context, options.getTimeoutSeconds());
+        }
+
+        this.removeContainer(context, options.getTimeoutSeconds());
+
+        if (options.isCleanupDirectory() && context.shouldCleanupDirectory) {
+            this.cleanupServerVolume(context.volumePath, serverId);
+        }
+
+        if (options.isRemoveFromTracking()) {
+            this.cleanupServerTracking(serverId);
+        } else {
+            Logger.debug("Skipping tracking cleanup for server: {} (removeFromTracking=false)", containerName);
+        }
+
+        Logger.info("Successfully completed deletion for server: {} ({})", containerName, serverId);
+        return true;
+    }
+
+    private static class DeletionContext {
+        final String serverId;
+        final String containerId;
+        final String containerName;
+        final boolean containerExists;
+        final boolean shouldCleanupDirectory;
+        final String volumePath;
+
+        DeletionContext(String serverId, String containerId, String containerName,
+                        boolean containerExists, boolean shouldCleanupDirectory, String volumePath) {
+            this.serverId = serverId;
+            this.containerId = containerId;
+            this.containerName = containerName;
+            this.containerExists = containerExists;
+            this.shouldCleanupDirectory = shouldCleanupDirectory;
+            this.volumePath = volumePath;
+        }
+    }
+
+    private void releaseServerPort(AtlasServer server) {
+        if (this.isProxyServer(server.getGroup())) {
+            this.releaseProxyPortForServer(server.getServerId());
+            Logger.debug("Released proxy port for server {} during unified deletion", server.getName());
+        }
+    }
+
+    private void closeServerStreams(String serverId) {
+        Closeable logConnection = this.logStreamConnections.remove(serverId);
+        if (logConnection != null) {
+            try {
+                logConnection.close();
+                Logger.debug("Closed log stream for server: {}", serverId);
+            } catch (IOException e) {
+                Logger.warn("Error closing log stream for server {}: {}", serverId, e.getMessage());
+            }
+        }
+    }
+
+    private DeletionContext prepareDeletionContext(AtlasServer server, DeletionOptions options) {
+        String serverId = server.getServerId();
+        String containerName = server.getName();
+        String containerId = this.serverContainerIds.get(serverId);
+
+        if (containerId == null) {
+            Logger.warn("Container ID not found for server: {} - assuming already deleted", containerName);
+            return new DeletionContext(serverId, null, containerName, false, false, null);
+        }
+
+        boolean containerExists = true;
+        boolean shouldCleanupDirectory = false;
+        String volumePath = null;
+
+        try {
+            InspectContainerResponse containerInfo = this.dockerClient.inspectContainerCmd(containerId).exec();
+            Map<String, String> labels = containerInfo.getConfig().getLabels();
+
+            String dynamicLabel = labels != null ? labels.get("atlas.dynamic") : null;
+            boolean isDynamic = "true".equals(dynamicLabel);
+
+            if (isDynamic && options.isCleanupDirectory() && server.getWorkingDirectory() != null) {
+                shouldCleanupDirectory = true;
+                volumePath = server.getWorkingDirectory();
+                if (!volumePath.startsWith("/")) {
+                    volumePath = System.getProperty("user.dir") + "/" + volumePath;
+                }
+            }
+
+            Logger.debug("Container {} exists, dynamic: {}, cleanup dir: {}",
+                    containerId.substring(0, 12), isDynamic, shouldCleanupDirectory);
+
+        } catch (Exception e) {
+            Logger.debug("Could not inspect container {} (may not exist): {}",
+                    containerId.substring(0, 12), e.getMessage());
+        }
+
+        return new DeletionContext(serverId, containerId, containerName,
+                containerExists, shouldCleanupDirectory, volumePath);
+    }
+
+    private void stopContainerGracefully(DeletionContext context, int timeoutSeconds) throws Exception {
+        if (context.containerId == null) {
+            Logger.debug("No container ID to stop for server: {}", context.containerName);
+            return;
+        }
+
+        try {
+            Logger.debug("Gracefully stopping container: {}", context.containerId.substring(0, 12));
+            this.dockerClient.stopContainerCmd(context.containerId)
+                    .withTimeout(timeoutSeconds)
+                    .exec();
+
+            this.waitForContainerStop(context.containerId);
+            Logger.debug("Container {} stopped gracefully", context.containerId.substring(0, 12));
+
+        } catch (Exception e) {
+            Logger.warn("Graceful stop failed for container {}: {}",
+                    context.containerId.substring(0, 12), e.getMessage());
+        }
+    }
+
+    private void removeContainer(DeletionContext context, int timeoutSeconds) throws Exception {
+        if (context.containerId == null) {
+            Logger.debug("No container ID to remove for server: {}", context.containerName);
+            return;
+        }
+
+        boolean volumesRemoved = false;
+
+        try {
+            Logger.debug("Removing container: {}", context.containerId.substring(0, 12));
+            this.dockerClient.removeContainerCmd(context.containerId)
+                    .withForce(true)
+                    .exec();
+            this.waitForContainerDeletion(context.containerId);
+
+        } catch (Exception firstAttempt) {
+            Logger.warn("First removal attempt failed for {}: {}, trying with volumes",
+                    context.containerId.substring(0, 12), firstAttempt.getMessage());
+
+            try {
+                this.dockerClient.removeContainerCmd(context.containerId)
+                        .withForce(true)
+                        .withRemoveVolumes(true)
+                        .exec();
+                this.waitForContainerDeletion(context.containerId);
+                volumesRemoved = true;
+
+            } catch (Exception secondAttempt) {
+                Logger.error("Both removal attempts failed for container {}: {}",
+                        context.containerId.substring(0, 12), secondAttempt.getMessage());
+                throw new Exception("Failed to remove container after multiple attempts", secondAttempt);
+            }
+        }
+
+        Logger.debug("Successfully removed container: {} (volumes removed: {})",
+                context.containerId.substring(0, 12), volumesRemoved);
+    }
+
+    private void cleanupServerTracking(String serverId) {
+        this.servers.remove(serverId);
+        this.serverContainerIds.remove(serverId);
+        this.logSubscribers.remove(serverId);
+        this.serverIdToPort.remove(serverId);
+
+        Logger.debug("Cleaned up all tracking for server: {}", serverId);
     }
 
     private void waitForContainerDeletion(String containerId) {
@@ -362,7 +506,8 @@ public final class DockerServiceProvider extends ServiceProvider {
             }
         }
 
-        Logger.warn("Container {} may not be fully deleted after 10 seconds", containerId.substring(0, 12));
+        Logger.error("Container {} failed to delete after 10 seconds timeout", containerId.substring(0, 12));
+        throw new RuntimeException("Container failed to delete within timeout: " + containerId);
     }
 
     private void waitForContainerStop(String containerId) {
@@ -381,7 +526,8 @@ public final class DockerServiceProvider extends ServiceProvider {
             }
         }
 
-        Logger.warn("Container {} may not be fully stopped after 10 seconds", containerId.substring(0, 12));
+        Logger.error("Container {} failed to stop after 10 seconds timeout", containerId.substring(0, 12));
+        throw new RuntimeException("Container failed to stop within timeout: " + containerId);
     }
 
     private void cleanupServerVolume(String volumePath, String serverId) {
@@ -603,8 +749,10 @@ public final class DockerServiceProvider extends ServiceProvider {
                     .withNetworkMode(this.dockerConfig.getNetwork());
 
             if (this.isProxyServer(atlasServer.getGroup())) {
-                int hostPort = this.getNextAvailableProxyPort();
+                int hostPort = this.getNextAvailableProxyPort(atlasServer.getName());
                 createCmd = createCmd.withPortBindings(PortBinding.parse(hostPort + ":25565"));
+
+                this.serverIdToPort.put(atlasServer.getServerId(), hostPort);
 
                 Logger.debug("Exposing proxy {} on host port {}", atlasServer.getName(), hostPort);
             }
@@ -1199,49 +1347,106 @@ public final class DockerServiceProvider extends ServiceProvider {
         }
     }
 
-    private int getNextAvailableProxyPort() {
+    private int getNextAvailableProxyPort(String serverName) {
+        Integer previousPort = this.serverNameToPort.get(serverName);
+        Logger.debug("Port allocation for server {}: previous port = {}, used ports = {}",
+                serverName, previousPort, this.usedProxyPorts);
+
+        if (previousPort != null && !this.usedProxyPorts.contains(previousPort)) {
+            this.usedProxyPorts.add(previousPort);
+            Logger.debug("Reusing port {} for server {}", previousPort, serverName);
+            return previousPort;
+        }
+
+        if (previousPort != null) {
+            Logger.debug("Cannot reuse port {} for server {} - port is already in use", previousPort, serverName);
+        }
+
         int port = PROXY_PORT_START;
         while (this.usedProxyPorts.contains(port)) {
             port++;
         }
+
         this.usedProxyPorts.add(port);
+        this.serverNameToPort.put(serverName, port);
+        Logger.debug("Assigned new port {} to server {}", port, serverName);
         return port;
     }
 
     private void releaseProxyPort(int port) {
         this.usedProxyPorts.remove(port);
+        Logger.debug("Released proxy port {} from used ports. Current used ports: {}", port, this.usedProxyPorts);
     }
 
     private boolean isProxyServer(String group) {
         return group != null && group.equalsIgnoreCase("proxy");
     }
 
-    private void releaseProxyPortForContainer(String containerId) {
+    private void releaseProxyPortForServer(String serverId) {
+        this.releaseProxyPortForServer(serverId, false);
+    }
+
+    private void releaseProxyPortForServer(String serverId, boolean deleteMapping) {
+        Integer port = deleteMapping ? this.serverIdToPort.remove(serverId) : this.serverIdToPort.get(serverId);
+        if (port != null) {
+            boolean wasUsed = this.usedProxyPorts.contains(port);
+            if (wasUsed) {
+                this.releaseProxyPort(port);
+                Logger.debug("Released proxy port {} for server {} (deleteMapping: {})", port, serverId, deleteMapping);
+            } else {
+                Logger.debug("Proxy port {} for server {} was already released", port, serverId);
+            }
+        } else {
+            Logger.debug("No proxy port found for server {}", serverId);
+        }
+    }
+
+    public void validateServerState() {
         try {
-            InspectContainerResponse containerInfo = this.dockerClient.inspectContainerCmd(containerId).exec();
-            if (containerInfo.getNetworkSettings() != null &&
-                    containerInfo.getNetworkSettings().getPorts() != null) {
+            List<Container> containers = this.dockerClient.listContainersCmd()
+                    .withShowAll(true)
+                    .withLabelFilter(Map.of("atlas.managed", "true"))
+                    .exec();
 
-                Ports ports = containerInfo.getNetworkSettings().getPorts();
-                for (Map.Entry<ExposedPort, Ports.Binding[]> entry : ports.getBindings().entrySet()) {
-                    ExposedPort exposedPort = entry.getKey();
-                    Ports.Binding[] bindings = entry.getValue();
+            Set<String> actualContainerIds = containers.stream()
+                    .map(Container::getId)
+                    .collect(Collectors.toSet());
 
-                    if (bindings != null && exposedPort.getPort() == 25565) {
-                        for (Ports.Binding binding : bindings) {
-                            try {
-                                int hostPort = Integer.parseInt(binding.getHostPortSpec());
-                                this.releaseProxyPort(hostPort);
-                                Logger.debug("Released proxy port {} for container {}", hostPort, containerId.substring(0, 12));
-                            } catch (NumberFormatException e) {
-                                Logger.debug("Could not parse host port: {}", binding.getHostPortSpec());
-                            }
-                        }
-                    }
+            List<String> zombieServerIds = new ArrayList<>();
+            for (String serverId : this.servers.keySet()) {
+                String containerId = this.serverContainerIds.get(serverId);
+                if (containerId != null && !actualContainerIds.contains(containerId)) {
+                    Logger.warn("Detected zombie server: {} (container {} not found in Docker)", serverId, containerId.substring(0, 12));
+                    Logger.debug("Cleaning up zombie server tracking for: {}", serverId);
+
+                    this.servers.remove(serverId);
+                    this.serverContainerIds.remove(serverId);
+                    this.logSubscribers.remove(serverId);
+                    this.serverIdToPort.remove(serverId);
+
+                    zombieServerIds.add(serverId);
                 }
             }
+
+            if (!zombieServerIds.isEmpty()) {
+                AtlasBase atlasInstance = AtlasBase.getInstance();
+                if (atlasInstance != null && atlasInstance.getScalerManager() != null) {
+                    atlasInstance.getScalerManager().getScalers().forEach(scaler -> {
+                        zombieServerIds.forEach(scaler::removeServerFromTracking);
+                    });
+                    Logger.debug("Cleaned up {} zombie servers from Atlas tracking", zombieServerIds.size());
+                }
+            }
+
+            for (Container container : containers) {
+                String containerId = container.getId();
+                if (!this.serverContainerIds.containsValue(containerId)) {
+                    Logger.warn("Detected untracked container: {} ({})", container.getNames()[0], containerId.substring(0, 12));
+                }
+            }
+
         } catch (Exception e) {
-            Logger.debug("Could not release proxy port for container {}: {}", containerId.substring(0, 12), e.getMessage());
+            Logger.debug("Error validating server state: {}", e.getMessage());
         }
     }
 }

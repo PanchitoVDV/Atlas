@@ -124,40 +124,37 @@ public final class ServersCommand implements AtlasCommand {
             serversFuture = provider.getAllServers();
         }
 
-        AtlasBase.getInstance().runAsync(() -> {
-            try {
-                List<AtlasServer> servers = serversFuture.get();
-
-                if (servers.isEmpty()) {
-                    Logger.info("No servers found.");
-                    return;
-                }
-
-                Logger.info("Servers (" + servers.size() + " total):");
-                Logger.info("");
-
-                String format = "%-15s %-10s %-10s %-8s %-12s %-8s %s";
-                Logger.info(String.format(format, "Name", "Group", "Status", "Players", "Type", "Manual", "Address"));
-                Logger.info("-".repeat(85));
-
-                for (AtlasServer server : servers) {
-                    String players = (server.getServerInfo() != null ? server.getServerInfo().getOnlinePlayers() : 0) + "/" + (server.getServerInfo() != null ? server.getServerInfo().getMaxPlayers() : 0);
-                    String address = server.getAddress() + ":" + server.getPort();
-                    String manual = server.isManuallyScaled() ? "Yes" : "No";
-
-                    Logger.info(String.format(format,
-                            server.getName(),
-                            server.getGroup(),
-                            server.getServerInfo() != null ? server.getServerInfo().getStatus() : "UNKNOWN",
-                            players,
-                            server.getType(),
-                            manual,
-                            address
-                    ));
-                }
-            } catch (Exception e) {
-                Logger.error("Failed to retrieve servers: " + e.getMessage());
+        serversFuture.thenAccept(servers -> {
+            if (servers.isEmpty()) {
+                Logger.info("No servers found.");
+                return;
             }
+
+            Logger.info("Servers (" + servers.size() + " total):");
+            Logger.info("");
+
+            String format = "%-15s %-10s %-10s %-8s %-12s %-8s %s";
+            Logger.info(String.format(format, "Name", "Group", "Status", "Players", "Type", "Manual", "Address"));
+            Logger.info("-".repeat(85));
+
+            for (AtlasServer server : servers) {
+                String players = (server.getServerInfo() != null ? server.getServerInfo().getOnlinePlayers() : 0) + "/" + (server.getServerInfo() != null ? server.getServerInfo().getMaxPlayers() : 0);
+                String address = server.getAddress() + ":" + server.getPort();
+                String manual = server.isManuallyScaled() ? "Yes" : "No";
+
+                Logger.info(String.format(format,
+                        server.getName(),
+                        server.getGroup(),
+                        server.getServerInfo() != null ? server.getServerInfo().getStatus() : "UNKNOWN",
+                        players,
+                        server.getType(),
+                        manual,
+                        address
+                ));
+            }
+        }).exceptionally(throwable -> {
+            Logger.error("Failed to retrieve servers: " + throwable.getMessage());
+            return null;
         });
     }
 
@@ -170,40 +167,37 @@ public final class ServersCommand implements AtlasCommand {
         String identifier = args[1];
         ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
 
-        AtlasBase.getInstance().runAsync(() -> {
-            try {
-                Optional<AtlasServer> serverOpt = this.findServerByIdOrName(provider, identifier).get();
-
-                if (serverOpt.isEmpty()) {
-                    Logger.error("Server not found: " + identifier);
-                    return;
-                }
-
-                AtlasServer server = serverOpt.get();
-                Logger.info("Server Information: " + server.getName());
-                Logger.info("");
-                Logger.info("  ID: " + server.getServerId());
-                Logger.info("  Name: " + server.getName());
-                Logger.info("  Group: " + server.getGroup());
-                Logger.info("  Status: " + (server.getServerInfo() != null ? server.getServerInfo().getStatus() : "UNKNOWN"));
-                Logger.info("  Type: " + server.getType());
-                Logger.info("  Address: " + server.getAddress() + ":" + server.getPort());
-                Logger.info("  Players: " + (server.getServerInfo() != null ? server.getServerInfo().getOnlinePlayers() : 0) + "/" + (server.getServerInfo() != null ? server.getServerInfo().getMaxPlayers() : 0));
-                Logger.info("  Manually Scaled: " + (server.isManuallyScaled() ? "Yes" : "No"));
-                Logger.info("  Service Provider: " + server.getServiceProviderId());
-
-                LocalDateTime createdAt = LocalDateTime.ofInstant(Instant.ofEpochMilli(server.getCreatedAt()), ZoneId.systemDefault());
-                Logger.info("  Created: " + createdAt.format(DATE_FORMATTER));
-
-                LocalDateTime lastHeartbeat = LocalDateTime.ofInstant(Instant.ofEpochMilli(server.getServerInfo() != null ? server.getLastHeartbeat() : 0), ZoneId.systemDefault());
-                Logger.info("  Last Heartbeat: " + lastHeartbeat.format(DATE_FORMATTER));
-
-                if (server.getServerInfo() != null && server.getServerInfo().getOnlinePlayerNames() != null && !server.getServerInfo().getOnlinePlayerNames().isEmpty()) {
-                    Logger.info("  Online Players: " + String.join(", ", server.getServerInfo().getOnlinePlayerNames()));
-                }
-            } catch (Exception e) {
-                Logger.error("Failed to retrieve server status: " + e.getMessage());
+        this.findServerByIdOrName(provider, identifier).thenAccept(serverOpt -> {
+            if (serverOpt.isEmpty()) {
+                Logger.error("Server not found: " + identifier);
+                return;
             }
+
+            AtlasServer server = serverOpt.get();
+            Logger.info("Server Information: " + server.getName());
+            Logger.info("");
+            Logger.info("  ID: " + server.getServerId());
+            Logger.info("  Name: " + server.getName());
+            Logger.info("  Group: " + server.getGroup());
+            Logger.info("  Status: " + (server.getServerInfo() != null ? server.getServerInfo().getStatus() : "UNKNOWN"));
+            Logger.info("  Type: " + server.getType());
+            Logger.info("  Address: " + server.getAddress() + ":" + server.getPort());
+            Logger.info("  Players: " + (server.getServerInfo() != null ? server.getServerInfo().getOnlinePlayers() : 0) + "/" + (server.getServerInfo() != null ? server.getServerInfo().getMaxPlayers() : 0));
+            Logger.info("  Manually Scaled: " + (server.isManuallyScaled() ? "Yes" : "No"));
+            Logger.info("  Service Provider: " + server.getServiceProviderId());
+
+            LocalDateTime createdAt = LocalDateTime.ofInstant(Instant.ofEpochMilli(server.getCreatedAt()), ZoneId.systemDefault());
+            Logger.info("  Created: " + createdAt.format(DATE_FORMATTER));
+
+            LocalDateTime lastHeartbeat = LocalDateTime.ofInstant(Instant.ofEpochMilli(server.getServerInfo() != null ? server.getLastHeartbeat() : 0), ZoneId.systemDefault());
+            Logger.info("  Last Heartbeat: " + lastHeartbeat.format(DATE_FORMATTER));
+
+            if (server.getServerInfo() != null && server.getServerInfo().getOnlinePlayerNames() != null && !server.getServerInfo().getOnlinePlayerNames().isEmpty()) {
+                Logger.info("  Online Players: " + String.join(", ", server.getServerInfo().getOnlinePlayerNames()));
+            }
+        }).exceptionally(throwable -> {
+            Logger.error("Failed to retrieve server status: " + throwable.getMessage());
+            return null;
         });
     }
 
@@ -243,13 +237,11 @@ public final class ServersCommand implements AtlasCommand {
         Logger.info("Creating " + count + " server(s) in group: " + groupName);
 
         for (int i = 0; i < count; i++) {
-            AtlasBase.getInstance().runAsync(() -> {
-                try {
-                    scaler.upscale().get();
-                    Logger.info("Server created successfully in group: " + groupName);
-                } catch (Exception e) {
-                    Logger.error("Failed to create server: " + e.getMessage());
-                }
+            scaler.upscale().thenAccept(server -> {
+                Logger.info("Server created successfully in group: " + groupName);
+            }).exceptionally(throwable -> {
+                Logger.error("Failed to create server: " + throwable.getMessage());
+                return null;
             });
         }
     }
@@ -263,24 +255,21 @@ public final class ServersCommand implements AtlasCommand {
         String identifier = args[1];
         ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
 
-        AtlasBase.getInstance().runAsync(() -> {
-            try {
-                Optional<AtlasServer> serverOpt = this.findServerByIdOrName(provider, identifier).get();
-
-                if (serverOpt.isEmpty()) {
-                    Logger.error("Server not found: " + identifier);
-                    return;
-                }
-
-                AtlasServer server = serverOpt.get();
-
-                this.serverManager.removeServer(server).exceptionally(throwable -> {
-                    Logger.error("Failed to remove server: " + throwable.getMessage());
-                    return null;
-                });
-            } catch (Exception e) {
-                Logger.error("Failed to remove server: " + e.getMessage());
+        this.findServerByIdOrName(provider, identifier).thenAccept(serverOpt -> {
+            if (serverOpt.isEmpty()) {
+                Logger.error("Server not found: " + identifier);
+                return;
             }
+
+            AtlasServer server = serverOpt.get();
+
+            this.serverManager.removeServer(server).exceptionally(throwable -> {
+                Logger.error("Failed to remove server: " + throwable.getMessage());
+                return null;
+            });
+        }).exceptionally(throwable -> {
+            Logger.error("Failed to find server: " + throwable.getMessage());
+            return null;
         });
     }
 
@@ -309,18 +298,14 @@ public final class ServersCommand implements AtlasCommand {
         int finalLines = lines;
         ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
 
-        AtlasBase.getInstance().runAsync(() -> {
-            try {
-                Optional<AtlasServer> serverOpt = this.findServerByIdOrName(provider, identifier).get();
+        this.findServerByIdOrName(provider, identifier).thenCompose(serverOpt -> {
+            if (serverOpt.isEmpty()) {
+                Logger.error("Server not found: " + identifier);
+                return CompletableFuture.completedFuture(null);
+            }
 
-                if (serverOpt.isEmpty()) {
-                    Logger.error("Server not found: " + identifier);
-                    return;
-                }
-
-                AtlasServer server = serverOpt.get();
-                List<String> logLines = provider.getServerLogs(server.getServerId(), finalLines).get();
-
+            AtlasServer server = serverOpt.get();
+            return provider.getServerLogs(server.getServerId(), finalLines).thenAccept(logLines -> {
                 if (logLines.isEmpty()) {
                     Logger.info("No logs available for server: " + server.getName());
                     return;
@@ -332,9 +317,10 @@ public final class ServersCommand implements AtlasCommand {
                 for (String line : logLines) {
                     Logger.info(line);
                 }
-            } catch (Exception e) {
-                Logger.error("Failed to retrieve server logs: " + e.getMessage());
-            }
+            });
+        }).exceptionally(throwable -> {
+            Logger.error("Failed to retrieve server logs: " + throwable.getMessage());
+            return null;
         });
     }
 
@@ -350,47 +336,41 @@ public final class ServersCommand implements AtlasCommand {
         ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
 
         if (subscriptionId != null) {
-            AtlasBase.getInstance().runAsync(() -> {
-                try {
-                    boolean success = provider.stopLogStream(subscriptionId).get();
+            provider.stopLogStream(subscriptionId).thenAccept(success -> {
+                ServerLifecycleService.removeWatchSubscription(identifier);
 
-                    ServerLifecycleService.removeWatchSubscription(identifier);
-
-                    Logger.info("-".repeat(60));
-                    if (success) {
-                        Logger.info("STOPPED watching logs for server: " + identifier);
-                    } else {
-                        Logger.info("STOPPED watching logs for server: " + identifier + " (stream was already closed)");
-                    }
-                } catch (Exception e) {
-                    ServerLifecycleService.removeWatchSubscription(identifier);
-                    Logger.error("Failed to stop watching server logs: " + e.getMessage());
+                Logger.info("-".repeat(60));
+                if (success) {
+                    Logger.info("STOPPED watching logs for server: " + identifier);
+                } else {
+                    Logger.info("STOPPED watching logs for server: " + identifier + " (stream was already closed)");
                 }
+            }).exceptionally(throwable -> {
+                ServerLifecycleService.removeWatchSubscription(identifier);
+                Logger.error("Failed to stop watching server logs: " + throwable.getMessage());
+                return null;
             });
         } else {
-            AtlasBase.getInstance().runAsync(() -> {
-                try {
-                    Optional<AtlasServer> serverOpt = this.findServerByIdOrName(provider, identifier).get();
-
-                    if (serverOpt.isEmpty()) {
-                        Logger.error("Server not found: " + identifier);
-                        return;
-                    }
-
-                    AtlasServer server = serverOpt.get();
-                    Logger.info("STARTED watching logs for server: " + server.getName());
-                    Logger.info("Run 'servers watch " + identifier + "' again to stop watching.");
-                    Logger.info("-".repeat(60));
-
-                    String newSubscriptionId = provider.streamServerLogs(server.getServerId(), logLine -> {
-                        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
-                        Logger.info("[" + timestamp + "] [" + server.getName() + "] " + logLine);
-                    }).get();
-
-                    ServerLifecycleService.addWatchSubscription(identifier, newSubscriptionId);
-                } catch (Exception e) {
-                    Logger.error("Failed to start watching server logs: " + e.getMessage());
+            this.findServerByIdOrName(provider, identifier).thenCompose(serverOpt -> {
+                if (serverOpt.isEmpty()) {
+                    Logger.error("Server not found: " + identifier);
+                    return CompletableFuture.completedFuture(null);
                 }
+
+                AtlasServer server = serverOpt.get();
+                Logger.info("STARTED watching logs for server: " + server.getName());
+                Logger.info("Run 'servers watch " + identifier + "' again to stop watching.");
+                Logger.info("-".repeat(60));
+
+                return provider.streamServerLogs(server.getServerId(), logLine -> {
+                    String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
+                    Logger.info("[" + timestamp + "] [" + server.getName() + "] " + logLine);
+                }).thenAccept(newSubscriptionId -> {
+                    ServerLifecycleService.addWatchSubscription(identifier, newSubscriptionId);
+                });
+            }).exceptionally(throwable -> {
+                Logger.error("Failed to start watching server logs: " + throwable.getMessage());
+                return null;
             });
         }
     }
@@ -404,24 +384,21 @@ public final class ServersCommand implements AtlasCommand {
         String identifier = args[1];
         ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
 
-        AtlasBase.getInstance().runAsync(() -> {
-            try {
-                Optional<AtlasServer> serverOpt = this.findServerByIdOrName(provider, identifier).get();
-
-                if (serverOpt.isEmpty()) {
-                    Logger.error("Server not found: " + identifier);
-                    return;
-                }
-
-                AtlasServer server = serverOpt.get();
-
-                this.serverManager.startServer(server).exceptionally(throwable -> {
-                    Logger.error("Failed to start server: " + throwable.getMessage());
-                    return null;
-                });
-            } catch (Exception e) {
-                Logger.error("Failed to start server: " + e.getMessage());
+        this.findServerByIdOrName(provider, identifier).thenAccept(serverOpt -> {
+            if (serverOpt.isEmpty()) {
+                Logger.error("Server not found: " + identifier);
+                return;
             }
+
+            AtlasServer server = serverOpt.get();
+
+            this.serverManager.startServer(server).exceptionally(throwable -> {
+                Logger.error("Failed to start server: " + throwable.getMessage());
+                return null;
+            });
+        }).exceptionally(throwable -> {
+            Logger.error("Failed to find server: " + throwable.getMessage());
+            return null;
         });
     }
 
@@ -434,26 +411,23 @@ public final class ServersCommand implements AtlasCommand {
         String identifier = args[1];
         ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
 
-        AtlasBase.getInstance().runAsync(() -> {
-            try {
-                Optional<AtlasServer> serverOpt = this.findServerByIdOrName(provider, identifier).get();
-
-                if (serverOpt.isEmpty()) {
-                    Logger.error("Server not found: " + identifier);
-                    return;
-                }
-
-                AtlasServer server = serverOpt.get();
-
-                Logger.info("Stopping server: " + server.getName());
-
-                this.serverManager.stopServer(server).exceptionally(throwable -> {
-                    Logger.error("Failed to stop server: " + throwable.getMessage());
-                    return null;
-                });
-            } catch (Exception e) {
-                Logger.error("Failed to stop server: " + e.getMessage());
+        this.findServerByIdOrName(provider, identifier).thenAccept(serverOpt -> {
+            if (serverOpt.isEmpty()) {
+                Logger.error("Server not found: " + identifier);
+                return;
             }
+
+            AtlasServer server = serverOpt.get();
+
+            Logger.info("Stopping server: " + server.getName());
+
+            this.serverManager.stopServer(server).exceptionally(throwable -> {
+                Logger.error("Failed to stop server: " + throwable.getMessage());
+                return null;
+            });
+        }).exceptionally(throwable -> {
+            Logger.error("Failed to find server: " + throwable.getMessage());
+            return null;
         });
     }
 
@@ -466,24 +440,21 @@ public final class ServersCommand implements AtlasCommand {
         String identifier = args[1];
         ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
 
-        AtlasBase.getInstance().runAsync(() -> {
-            try {
-                Optional<AtlasServer> serverOpt = this.findServerByIdOrName(provider, identifier).get();
-
-                if (serverOpt.isEmpty()) {
-                    Logger.error("Server not found: " + identifier);
-                    return;
-                }
-
-                AtlasServer server = serverOpt.get();
-
-                this.serverManager.restartServer(server).exceptionally(throwable -> {
-                    Logger.error("Failed to restart server: " + throwable.getMessage());
-                    return null;
-                });
-            } catch (Exception e) {
-                Logger.error("Failed to restart server: " + e.getMessage());
+        this.findServerByIdOrName(provider, identifier).thenAccept(serverOpt -> {
+            if (serverOpt.isEmpty()) {
+                Logger.error("Server not found: " + identifier);
+                return;
             }
+
+            AtlasServer server = serverOpt.get();
+
+            this.serverManager.restartServer(server).exceptionally(throwable -> {
+                Logger.error("Failed to restart server: " + throwable.getMessage());
+                return null;
+            });
+        }).exceptionally(throwable -> {
+            Logger.error("Failed to find server: " + throwable.getMessage());
+            return null;
         });
     }
 

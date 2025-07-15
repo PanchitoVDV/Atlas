@@ -115,6 +115,7 @@ public final class AtlasBase {
                     this.providerManager.shutdown();
 
                 Logger.info("Atlas has been stopped successfully.");
+                Logger.closeLogFile();
             } catch (Exception e) {
                 Logger.error("Error during Atlas shutdown", e);
             } finally {

@@ -3,6 +3,8 @@ package be.esmay.atlas.base.lifecycle;
 import be.esmay.atlas.base.AtlasBase;
 import be.esmay.atlas.base.api.WebSocketManager;
 import be.esmay.atlas.base.api.dto.WebSocketMessage;
+import be.esmay.atlas.base.provider.DeletionOptions;
+import be.esmay.atlas.base.provider.DeletionReason;
 import be.esmay.atlas.base.provider.ServiceProvider;
 import be.esmay.atlas.base.scaler.Scaler;
 import be.esmay.atlas.base.utils.Logger;
@@ -66,33 +68,41 @@ public final class ServerLifecycleService {
      * @return CompletableFuture that completes when the server is stopped
      */
     public CompletableFuture<Void> stopServer(AtlasServer server) {
-        if (server.isShutdown()) {
-            Logger.debug("Server {} is already being shutdown, skipping stop operation", server.getName());
-            return CompletableFuture.completedFuture(null);
-        }
-
         if (server.getServerInfo() != null && server.getServerInfo().getStatus() == ServerStatus.STOPPED) {
             Logger.info("Server is already stopped: " + server.getName());
             return CompletableFuture.completedFuture(null);
         }
 
         if (server.getType() == ServerType.DYNAMIC) {
-            return this.removeServer(server);
+            Logger.debug("Detected DYNAMIC server {}, using unified deletion", server.getName());
+            return this.removeServer(server, DeletionOptions.userCommand());
         }
+        
+        Logger.debug("Detected STATIC server {}, using unified deletion with stop-only mode", server.getName());
 
-        server.setShutdown(true);
+        DeletionOptions staticStopOptions = DeletionOptions.builder()
+            .reason(DeletionReason.USER_COMMAND)
+            .gracefulStop(true)
+            .cleanupDirectory(false)
+            .removeFromTracking(false)
+            .build();
 
         ServiceProvider provider = this.atlasBase.getProviderManager().getProvider();
-        ServerLifecycleManager lifecycleManager = new ServerLifecycleManager(this.atlasBase);
-
-        return lifecycleManager.stopServer(provider, server, false)
-                .thenRun(() -> {
-                    Logger.info("Successfully stopped server: " + server.getName());
-                    this.cleanupServerResources(server);
-                    this.notifyServerUpdate(server);
+        
+        return provider.deleteServerCompletely(server, staticStopOptions)
+                .thenAccept(success -> {
+                    if (success) {
+                        Logger.info("Successfully stopped STATIC server: {}", server.getName());
+                        server.setShutdown(false);
+                        this.cleanupServerResources(server);
+                        this.notifyServerUpdate(server);
+                    } else {
+                        Logger.error("Failed to stop STATIC server: {}", server.getName());
+                    }
                 })
                 .exceptionally(throwable -> {
-                    Logger.error("Failed to stop server: " + server.getName(), throwable);
+                    Logger.error("Failed to stop STATIC server: {}", server.getName(), throwable);
+                    server.setShutdown(false);
                     return null;
                 });
     }
@@ -104,12 +114,17 @@ public final class ServerLifecycleService {
      * @return CompletableFuture that completes when the server is removed
      */
     public CompletableFuture<Void> removeServer(AtlasServer server) {
-        if (server.isShutdown()) {
-            Logger.debug("Server {} is already being shutdown, skipping remove operation", server.getName());
-            return CompletableFuture.completedFuture(null);
-        }
+        return this.removeServer(server, DeletionOptions.userCommand());
+    }
 
-        server.setShutdown(true);
+    /**
+     * Remove server with specific deletion options
+     */
+    public CompletableFuture<Void> removeServer(AtlasServer server, DeletionOptions options) {
+        boolean wasAlreadyShutdown = server.isShutdown();
+        if (wasAlreadyShutdown) {
+            Logger.warn("Server {} is already marked as shutdown - using unified deletion to prevent zombie state", server.getName());
+        }
 
         Scaler scaler = this.getScalerForServer(server);
         if (scaler == null) {
@@ -117,18 +132,33 @@ public final class ServerLifecycleService {
         }
 
         ServiceProvider provider = this.atlasBase.getProviderManager().getProvider();
-        ServerLifecycleManager lifecycleManager = new ServerLifecycleManager(this.atlasBase);
-
-        return lifecycleManager.deleteServerCompletely(provider, server)
-                .thenRun(() -> {
-                    scaler.removeServerFromTracking(server.getServerId());
-
-                    Logger.debug("Successfully removed server: " + server.getName());
-                    this.cleanupServerResources(server);
-                    this.notifyServerRemoval(server);
+        
+        Logger.debug("Starting deletion for server: {} with options: {}", server.getName(), options.getReason());
+        
+        return provider.deleteServerCompletely(server, options)
+                .thenAccept(success -> {
+                    if (success) {
+                        if (options.isRemoveFromTracking()) {
+                            scaler.removeServerFromTracking(server.getServerId());
+                        }
+                        
+                        Logger.debug("Successfully removed server: {} (reason: {})", server.getName(), options.getReason());
+                        this.cleanupServerResources(server);
+                        this.notifyServerRemoval(server);
+                    } else {
+                        Logger.error("Unified deletion reported failure for server: {}", server.getName());
+                    }
                 })
                 .exceptionally(throwable -> {
-                    Logger.error("Failed to remove server: " + server.getName(), throwable);
+                    Logger.error("Failed to remove server: {} - Error: {}", server.getName(), throwable.getMessage());
+
+                    if (options.isRemoveFromTracking()) {
+                        scaler.removeServerFromTracking(server.getServerId());
+                        Logger.warn("Ensured server {} tracking removal after unified deletion failure", server.getName());
+                    }
+
+                    this.cleanupServerResources(server);
+                    
                     return null;
                 });
     }

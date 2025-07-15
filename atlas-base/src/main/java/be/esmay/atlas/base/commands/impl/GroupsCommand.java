@@ -280,8 +280,7 @@ public final class GroupsCommand implements AtlasCommand {
             for (AtlasServer server : scaler.getServers()) {
                 if (server.getServerInfo() != null && server.getServerInfo().getStatus() == ServerStatus.RUNNING) {
                     try {
-                        AtlasBase.getInstance().getProviderManager().getProvider()
-                                .stopServer(server).get();
+                        AtlasBase.getInstance().getServerManager().stopServer(server).get();
                         stoppedCount++;
                         Logger.info("Stopped server: " + server.getName());
                     } catch (Exception e) {
@@ -314,8 +313,7 @@ public final class GroupsCommand implements AtlasCommand {
             for (AtlasServer server : scaler.getServers()) {
                 if (server.getServerInfo() != null && server.getServerInfo().getStatus() == ServerStatus.RUNNING) {
                     try {
-                        AtlasBase.getInstance().getProviderManager().getProvider()
-                                .stopServer(server).get();
+                        AtlasBase.getInstance().getServerManager().stopServer(server).get();
 
                         Thread.sleep(1000);
                         AtlasBase.getInstance().getProviderManager().getProvider().startServer(server).get();

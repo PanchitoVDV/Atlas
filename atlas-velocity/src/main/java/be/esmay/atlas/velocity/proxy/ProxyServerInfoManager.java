@@ -2,6 +2,7 @@ package be.esmay.atlas.velocity.proxy;
 
 import be.esmay.atlas.common.enums.ServerStatus;
 import be.esmay.atlas.common.models.ServerInfo;
+import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
 import lombok.RequiredArgsConstructor;
 
@@ -17,7 +18,7 @@ public final class ProxyServerInfoManager {
                 .status(ServerStatus.RUNNING)
                 .onlinePlayers(this.proxyServer.getAllPlayers().size())
                 .maxPlayers(this.proxyServer.getConfiguration().getShowMaxPlayers())
-                .onlinePlayerNames(new HashSet<>())
+                .onlinePlayerNames(new HashSet<>(this.proxyServer.getAllPlayers().stream().map(Player::getUsername).toList()))
                 .build();
     }
 

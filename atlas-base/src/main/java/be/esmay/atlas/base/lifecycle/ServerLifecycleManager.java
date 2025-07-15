@@ -4,6 +4,8 @@ import be.esmay.atlas.base.AtlasBase;
 import be.esmay.atlas.base.api.dto.WebSocketMessage;
 import be.esmay.atlas.base.config.impl.ScalerConfig;
 import be.esmay.atlas.base.directory.DirectoryManager;
+import be.esmay.atlas.base.provider.DeletionOptions;
+import be.esmay.atlas.base.provider.DeletionReason;
 import be.esmay.atlas.base.provider.ServiceProvider;
 import be.esmay.atlas.base.template.TemplateManager;
 import be.esmay.atlas.base.utils.Logger;
@@ -59,33 +61,44 @@ public final class ServerLifecycleManager {
     }
 
     public CompletableFuture<Void> stopServer(ServiceProvider serviceProvider, AtlasServer server, boolean isRestart) {
-        boolean shouldDelete = !isRestart && server.getType() == ServerType.DYNAMIC;
+        if (isRestart) {
+            DeletionOptions restartOptions = DeletionOptions.builder()
+                    .reason(DeletionReason.USER_COMMAND)
+                    .gracefulStop(true)
+                    .cleanupDirectory(false)
+                    .removeFromTracking(false)
+                    .build();
+            return serviceProvider.deleteServerCompletely(server, restartOptions)
+                    .thenAccept(success -> {
+                        if (success) {
+                            Logger.debug("Successfully stopped server for restart: {}", server.getName());
+                            server.setShutdown(false);
+                        } else {
+                            Logger.warn("Unified deletion failed during restart for server: {}", server.getName());
+                        }
+                    });
+        } else {
+            DeletionOptions stopOptions = server.getType() == ServerType.DYNAMIC
+                    ? DeletionOptions.userCommand()
+                    : DeletionOptions.builder()
+                    .reason(DeletionReason.USER_COMMAND)
+                    .gracefulStop(true)
+                    .cleanupDirectory(false)
+                    .removeFromTracking(false)
+                    .build();
 
-        if (shouldDelete)
-            return this.deleteServerCompletely(serviceProvider, server);
-
-        CompletableFuture<Void> stopFuture = serviceProvider.stopServer(server);
-        return stopFuture.thenRun(() -> Logger.debug("Stopped server (preserved): " + server.getName()));
-    }
-
-    public CompletableFuture<Void> deleteServerCompletely(ServiceProvider serviceProvider, AtlasServer server) {
-        boolean cleanupDynamicOnShutdown = this.atlasBase.getConfigManager().getAtlasConfig().getAtlas().getTemplates().isCleanupDynamicOnShutdown();
-        boolean shouldCleanDirectory = server.getType() == ServerType.DYNAMIC && cleanupDynamicOnShutdown;
-
-        CompletableFuture<Void> stopFuture = serviceProvider.stopServer(server);
-        CompletableFuture<Boolean> deleteFuture = stopFuture.thenCompose(v -> serviceProvider.deleteServer(server.getServerId()));
-        return deleteFuture.thenAccept(deleted -> {
-            if (shouldCleanDirectory) {
-                try {
-                    this.directoryManager.cleanupServerDirectory(server);
-                    Logger.debug("Deleted and cleaned server: " + server.getName());
-                } catch (Exception e) {
-                    Logger.warn("Server deleted but directory cleanup failed for " + server.getName() + ": " + e.getMessage());
-                }
-            } else {
-                Logger.debug("Deleted server (preserved directory): " + server.getName());
-            }
-        });
+            return serviceProvider.deleteServerCompletely(server, stopOptions)
+                    .thenAccept(success -> {
+                        if (success) {
+                            Logger.debug("Successfully stopped server: {}", server.getName());
+                            if (server.getType() == ServerType.STATIC) {
+                                server.setShutdown(false);
+                            }
+                        } else {
+                            Logger.warn("Unified deletion failed for server: {}", server.getName());
+                        }
+                    });
+        }
     }
 
     public CompletableFuture<Void> restartServer(ServiceProvider serviceProvider, ScalerConfig.Group groupConfig, AtlasServer server) {

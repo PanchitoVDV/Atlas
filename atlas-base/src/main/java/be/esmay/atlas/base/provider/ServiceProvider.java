@@ -152,6 +152,24 @@ public abstract class ServiceProvider {
     }
     
     /**
+     * Validates that tracked servers match actual container states.
+     * This helps detect and clean up zombie servers.
+     */
+    public void validateServerState() {
+        // Default implementation does nothing - providers can override
+    }
+    
+    /**
+     * Unified method to completely remove a server with specified options.
+     * This is the single entry point for all server deletion operations.
+     * 
+     * @param server The server to delete
+     * @param options Options controlling how the deletion is performed
+     * @return CompletableFuture that completes when the server is fully removed
+     */
+    public abstract CompletableFuture<Boolean> deleteServerCompletely(AtlasServer server, DeletionOptions options);
+    
+    /**
      * Shuts down the service provider and releases all resources.
      * This method should be called when the application is shutting down.
      */

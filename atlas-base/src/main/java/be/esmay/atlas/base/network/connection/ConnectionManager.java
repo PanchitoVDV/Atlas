@@ -2,6 +2,7 @@ package be.esmay.atlas.base.network.connection;
 
 import be.esmay.atlas.base.AtlasBase;
 import be.esmay.atlas.base.lifecycle.ServerLifecycleService;
+import be.esmay.atlas.base.provider.DeletionOptions;
 import be.esmay.atlas.base.utils.Logger;
 import be.esmay.atlas.common.enums.ServerType;
 import be.esmay.atlas.common.models.AtlasServer;
@@ -145,7 +146,7 @@ public final class ConnectionManager {
         ServerLifecycleService lifecycleService = new ServerLifecycleService(atlasInstance);
 
         if (server.getType() == ServerType.DYNAMIC) {
-            lifecycleService.removeServer(server);
+            lifecycleService.removeServer(server, DeletionOptions.connectionLost());
         } else {
             lifecycleService.stopServer(server);
         }
