@@ -3,6 +3,7 @@ package be.esmay.atlas.base.commands.impl;
 import be.esmay.atlas.base.AtlasBase;
 import be.esmay.atlas.base.commands.AtlasCommand;
 import be.esmay.atlas.base.config.impl.ScalerConfig;
+import be.esmay.atlas.base.provider.StartOptions;
 import be.esmay.atlas.base.scaler.Scaler;
 import be.esmay.atlas.base.scaler.ScalerManager;
 import be.esmay.atlas.base.utils.Logger;
@@ -203,7 +204,7 @@ public final class GroupsCommand implements AtlasCommand {
         }
 
         double utilization = scaler.getCurrentUtilization();
-        var conditions = scaler.getScalerConfig().getGroup().getScaling().getConditions();
+        ScalerConfig.Conditions conditions = scaler.getScalerConfig().getGroup().getScaling().getConditions();
         int currentAutoServers = scaler.getAutoScaledServers().size();
         int minServers = scaler.getScalerConfig().getGroup().getServer().getMinServers();
         int maxServers = scaler.getScalerConfig().getGroup().getServer().getMaxServers();
@@ -246,8 +247,7 @@ public final class GroupsCommand implements AtlasCommand {
             for (AtlasServer server : scaler.getServers()) {
                 if (server.getServerInfo() != null && server.getServerInfo().getStatus() == ServerStatus.STOPPED) {
                     try {
-                        AtlasBase.getInstance().getProviderManager().getProvider()
-                                .startServer(server).get();
+                        AtlasBase.getInstance().getProviderManager().getProvider().startServerCompletely(server, StartOptions.userCommand()).get();
                         startedCount++;
                         Logger.info("Started server: " + server.getName());
                     } catch (Exception e) {
@@ -316,7 +316,7 @@ public final class GroupsCommand implements AtlasCommand {
                         AtlasBase.getInstance().getServerManager().stopServer(server).get();
 
                         Thread.sleep(1000);
-                        AtlasBase.getInstance().getProviderManager().getProvider().startServer(server).get();
+                        AtlasBase.getInstance().getProviderManager().getProvider().startServerCompletely(server, StartOptions.restart()).get();
                         restartedCount++;
                         Logger.info("Restarted server: " + server.getName());
                     } catch (Exception e) {

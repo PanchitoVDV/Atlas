@@ -6,6 +6,7 @@ import be.esmay.atlas.base.api.dto.WebSocketMessage;
 import be.esmay.atlas.base.provider.DeletionOptions;
 import be.esmay.atlas.base.provider.DeletionReason;
 import be.esmay.atlas.base.provider.ServiceProvider;
+import be.esmay.atlas.base.provider.StartOptions;
 import be.esmay.atlas.base.scaler.Scaler;
 import be.esmay.atlas.base.utils.Logger;
 import be.esmay.atlas.common.enums.ServerStatus;
@@ -33,27 +34,12 @@ public final class ServerLifecycleService {
      * @return CompletableFuture that completes when the server is started
      */
     public CompletableFuture<Void> startServer(AtlasServer server) {
-        if (server.isShutdown()) {
-            return CompletableFuture.failedFuture(new IllegalStateException("Cannot start server that is being shutdown: " + server.getName()));
-        }
-
-        if (server.getServerInfo() != null && server.getServerInfo().getStatus() == ServerStatus.RUNNING) {
-            Logger.info("Server is already running: " + server.getName());
-            return CompletableFuture.completedFuture(null);
-        }
-
-        Scaler scaler = this.getScalerForServer(server);
-        if (scaler == null) {
-            return CompletableFuture.failedFuture(new IllegalStateException("No scaler found for group: " + server.getGroup()));
-        }
-
         ServiceProvider provider = this.atlasBase.getProviderManager().getProvider();
-        ServerLifecycleManager lifecycleManager = new ServerLifecycleManager(this.atlasBase);
 
-        return lifecycleManager.startServer(provider, scaler.getScalerConfig().getGroup(), server)
-                .thenRun(() -> {
-                    Logger.info("Successfully started server: " + server.getName());
-                    this.notifyServerUpdate(server);
+        return provider.startServerCompletely(server, StartOptions.userCommand())
+                .thenAccept(startedServer -> {
+                    Logger.debug("Successfully started server through unified start: " + startedServer.getName());
+                    this.notifyServerUpdate(startedServer);
                 })
                 .exceptionally(throwable -> {
                     Logger.error("Failed to start server: " + server.getName(), throwable);
@@ -77,18 +63,18 @@ public final class ServerLifecycleService {
             Logger.debug("Detected DYNAMIC server {}, using unified deletion", server.getName());
             return this.removeServer(server, DeletionOptions.userCommand());
         }
-        
+
         Logger.debug("Detected STATIC server {}, using unified deletion with stop-only mode", server.getName());
 
         DeletionOptions staticStopOptions = DeletionOptions.builder()
-            .reason(DeletionReason.USER_COMMAND)
-            .gracefulStop(true)
-            .cleanupDirectory(false)
-            .removeFromTracking(false)
-            .build();
+                .reason(DeletionReason.USER_COMMAND)
+                .gracefulStop(true)
+                .cleanupDirectory(false)
+                .removeFromTracking(false)
+                .build();
 
         ServiceProvider provider = this.atlasBase.getProviderManager().getProvider();
-        
+
         return provider.deleteServerCompletely(server, staticStopOptions)
                 .thenAccept(success -> {
                     if (success) {
@@ -132,16 +118,16 @@ public final class ServerLifecycleService {
         }
 
         ServiceProvider provider = this.atlasBase.getProviderManager().getProvider();
-        
+
         Logger.debug("Starting deletion for server: {} with options: {}", server.getName(), options.getReason());
-        
+
         return provider.deleteServerCompletely(server, options)
                 .thenAccept(success -> {
                     if (success) {
                         if (options.isRemoveFromTracking()) {
                             scaler.removeServerFromTracking(server.getServerId());
                         }
-                        
+
                         Logger.debug("Successfully removed server: {} (reason: {})", server.getName(), options.getReason());
                         this.cleanupServerResources(server);
                         this.notifyServerRemoval(server);
@@ -158,7 +144,7 @@ public final class ServerLifecycleService {
                     }
 
                     this.cleanupServerResources(server);
-                    
+
                     return null;
                 });
     }
@@ -180,14 +166,13 @@ public final class ServerLifecycleService {
         }
 
         ServiceProvider provider = this.atlasBase.getProviderManager().getProvider();
-        ServerLifecycleManager lifecycleManager = new ServerLifecycleManager(this.atlasBase);
 
         WebSocketManager webSocketManager = this.atlasBase.getApiManager().getWebSocketManager();
         webSocketManager.handleServerRestartStart(server.getServerId());
 
-        return lifecycleManager.restartServer(provider, scaler.getScalerConfig().getGroup(), server)
-                .thenRun(() -> {
-                    Logger.info("Successfully restarted server: " + server.getName());
+        return provider.startServerCompletely(server, StartOptions.restart())
+                .thenAccept(restartedServer -> {
+                    Logger.debug("Successfully restarted server: " + restartedServer.getName());
 
                     WebSocketMessage restartMessage = WebSocketMessage.event("restart-completed", server.getServerId());
                     webSocketManager.sendToServerConnections(server.getServerId(), restartMessage);

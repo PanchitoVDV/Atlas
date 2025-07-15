@@ -2,6 +2,7 @@ package be.esmay.atlas.base.commands.impl;
 
 import be.esmay.atlas.base.AtlasBase;
 import be.esmay.atlas.base.commands.AtlasCommand;
+import be.esmay.atlas.base.config.impl.ScalerConfig;
 import be.esmay.atlas.base.scaler.Scaler;
 import be.esmay.atlas.base.scaler.ScalerManager;
 import be.esmay.atlas.base.utils.Logger;
@@ -84,7 +85,7 @@ public final class ScalingCommand implements AtlasCommand {
             Logger.info("  " + scaler.getScalingStatus());
 
             double utilization = scaler.getCurrentUtilization();
-            var conditions = scaler.getScalerConfig().getGroup().getScaling().getConditions();
+            ScalerConfig.Conditions conditions = scaler.getScalerConfig().getGroup().getScaling().getConditions();
             int currentAutoServers = scaler.getAutoScaledServers().size();
             int minServers = scaler.getScalerConfig().getGroup().getServer().getMinServers();
             int maxServers = scaler.getScalerConfig().getGroup().getServer().getMaxServers();

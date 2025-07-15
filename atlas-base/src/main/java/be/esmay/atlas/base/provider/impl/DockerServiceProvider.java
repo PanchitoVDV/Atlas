@@ -4,9 +4,14 @@ import be.esmay.atlas.base.AtlasBase;
 import be.esmay.atlas.base.config.impl.AtlasConfig;
 import be.esmay.atlas.base.config.impl.ScalerConfig;
 import be.esmay.atlas.base.directory.DirectoryManager;
+import be.esmay.atlas.base.lifecycle.ServerLifecycleManager;
 import be.esmay.atlas.base.provider.DeletionOptions;
 import be.esmay.atlas.base.provider.DeletionReason;
 import be.esmay.atlas.base.provider.ServiceProvider;
+import be.esmay.atlas.base.provider.StartOptions;
+import be.esmay.atlas.base.provider.StartReason;
+import be.esmay.atlas.base.scaler.Scaler;
+import be.esmay.atlas.base.template.TemplateManager;
 import be.esmay.atlas.base.utils.Logger;
 import be.esmay.atlas.common.enums.ServerStatus;
 import be.esmay.atlas.common.models.AtlasServer;
@@ -22,13 +27,11 @@ import com.github.dockerjava.api.model.Bind;
 import com.github.dockerjava.api.model.Container;
 import com.github.dockerjava.api.model.ContainerNetwork;
 import com.github.dockerjava.api.model.CpuStatsConfig;
-import com.github.dockerjava.api.model.ExposedPort;
 import com.github.dockerjava.api.model.Frame;
 import com.github.dockerjava.api.model.Info;
 import com.github.dockerjava.api.model.Network;
 import com.github.dockerjava.api.model.NetworkSettings;
 import com.github.dockerjava.api.model.PortBinding;
-import com.github.dockerjava.api.model.Ports;
 import com.github.dockerjava.api.model.PullResponseItem;
 import com.github.dockerjava.api.model.StatisticNetworksConfig;
 import com.github.dockerjava.api.model.Statistics;
@@ -223,7 +226,7 @@ public final class DockerServiceProvider extends ServiceProvider {
                         .build();
 
                 this.servers.put(atlasServer.getServerId(), updatedServer);
-                Logger.debug("Created Docker container: {} (ID: {}, Container: {})", atlasServer.getName(), atlasServer.getServerId(), containerId);
+                Logger.debug("Container created and started: {}", atlasServer.getName());
 
                 return updatedServer;
             } catch (Exception e) {
@@ -233,29 +236,6 @@ public final class DockerServiceProvider extends ServiceProvider {
         }, this.executorService);
     }
 
-    @Override
-    public CompletableFuture<Void> startServer(AtlasServer atlasServer) {
-        return CompletableFuture.runAsync(() -> {
-            try {
-                String containerId = this.serverContainerIds.get(atlasServer.getServerId());
-                if (containerId == null) {
-                    Logger.warn("Container ID not found for server: {}", atlasServer.getServerId());
-                    return;
-                }
-
-                this.dockerClient.startContainerCmd(containerId).exec();
-
-                if (atlasServer.getServerInfo() != null) {
-                    atlasServer.getServerInfo().setStatus(ServerStatus.STARTING);
-                    atlasServer.setLastHeartbeat(System.currentTimeMillis());
-                }
-
-                Logger.info("Started Docker container: {}", containerId);
-            } catch (Exception e) {
-                Logger.error("Error starting Docker server: {}", e.getMessage());
-            }
-        }, this.executorService);
-    }
 
     @Override
     public CompletableFuture<Void> stopServer(AtlasServer atlasServer) {
@@ -724,7 +704,7 @@ public final class DockerServiceProvider extends ServiceProvider {
                 AtlasConfig.Network networkConfig = atlasInstance.getConfigManager().getAtlasConfig().getAtlas().getNetwork();
                 envVars.add("ATLAS_HOST=" + this.getHostIpForContainers());
                 envVars.add("ATLAS_PORT=" + networkConfig.getPort());
-                envVars.add("ATLAS_NETTY_KEY=" + networkConfig.getNettyKey());
+                envVars.add("ATLAS_NETTY_KEY=" + atlasInstance.getNettyServer().getNettyKey());
             }
 
             if (dockerGroupConfig.getEnvironment() != null) {
@@ -1447,6 +1427,220 @@ public final class DockerServiceProvider extends ServiceProvider {
 
         } catch (Exception e) {
             Logger.debug("Error validating server state: {}", e.getMessage());
+        }
+    }
+
+    @Override
+    public CompletableFuture<AtlasServer> startServerCompletely(AtlasServer server, StartOptions options) {
+        if (server == null) {
+            return CompletableFuture.failedFuture(new IllegalArgumentException("Cannot start null server"));
+        }
+
+        Logger.info("Starting server: {} (reason: {}, directory: {}, templates: {})",
+                server.getName(), options.getReason(), options.isPrepareDirectory(), options.isApplyTemplates());
+
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                return this.performUnifiedStart(server, options);
+            } catch (Exception e) {
+                Logger.error("Unified start failed for server: {}", server.getName(), e);
+
+                if (options.isCleanupOnFailure()) {
+                    this.cleanupFailedStart(server);
+                }
+
+                throw new RuntimeException("Failed to start server: " + server.getName(), e);
+            }
+        }, this.executorService);
+    }
+
+    private AtlasServer performUnifiedStart(AtlasServer server, StartOptions options) throws Exception {
+        String serverId = server.getServerId();
+        String serverName = server.getName();
+
+        Logger.debug("Starting unified start process for server: {} ({})", serverName, serverId);
+
+        this.validateStartConditions(server, options);
+
+        if (options.isPrepareDirectory()) {
+            this.prepareServerDirectory(server, options);
+        }
+
+        if (options.isApplyTemplates()) {
+            this.applyServerTemplates(server, options);
+        }
+        if (options.isValidateResources()) {
+            this.validateStartResources(server, options);
+        }
+
+        AtlasServer startedServer = this.createAndStartContainer(server, options);
+
+        if (options.isAddToTracking()) {
+            this.addServerToTracking(startedServer);
+        }
+
+        if (options.isWaitForReady()) {
+            this.waitForServerReady(startedServer, options.getTimeoutSeconds());
+        }
+
+        Logger.debug("Successfully completed unified start for server: {} ({})", serverName, serverId);
+        return startedServer;
+    }
+
+    private void validateStartConditions(AtlasServer server, StartOptions options) throws Exception {
+        if (server.getServerInfo() != null && server.getServerInfo().getStatus() == ServerStatus.RUNNING) {
+            if (options.getReason() != StartReason.RECOVERY) {
+                throw new IllegalStateException("Server is already running: " + server.getName());
+            }
+        }
+
+        if (server.isShutdown() && options.getReason() != StartReason.RESTART && options.getReason() != StartReason.RECOVERY) {
+            throw new IllegalStateException("Cannot start server that is being shutdown: " + server.getName());
+        }
+
+        if (options.getReason() == StartReason.RESTART || options.getReason() == StartReason.RECOVERY) {
+            server.setShutdown(false);
+            Logger.debug("Reset shutdown flag for server: {} (reason: {})", server.getName(), options.getReason());
+        }
+
+        Logger.debug("Start conditions validated for server: {}", server.getName());
+    }
+
+    private void prepareServerDirectory(AtlasServer server, StartOptions options) throws Exception {
+        if (server.getWorkingDirectory() != null) {
+            Logger.debug("Working directory already set for server: {}", server.getName());
+            return;
+        }
+
+        ScalerConfig.Group groupConfig = this.getGroupConfigForServer(server);
+        if (groupConfig == null) {
+            throw new Exception("Cannot prepare directory without group config for server: " + server.getName());
+        }
+
+        AtlasBase atlasBase = AtlasBase.getInstance();
+        if (atlasBase != null) {
+            ServerLifecycleManager lifecycleManager = new ServerLifecycleManager();
+            this.prepareServerDirectoryInternal(server, groupConfig);
+        }
+
+        Logger.debug("Directory preparation completed for server: {}", server.getName());
+    }
+
+    private void prepareServerDirectoryInternal(AtlasServer server, ScalerConfig.Group groupConfig) {
+        DirectoryManager directoryManager = new DirectoryManager();
+
+        String workingDirectory = directoryManager.createServerDirectory(server);
+        server.setWorkingDirectory(workingDirectory);
+
+        Logger.debug("Created server directory: {}", workingDirectory);
+    }
+
+    private void applyServerTemplates(AtlasServer server, StartOptions options) throws Exception {
+        if (server.getWorkingDirectory() == null) {
+            Logger.warn("Cannot apply templates - no working directory set for server: {}", server.getName());
+            return;
+        }
+
+        ScalerConfig.Group groupConfig = this.getGroupConfigForServer(server);
+        if (groupConfig == null) {
+            throw new Exception("Cannot apply templates without group config for server: " + server.getName());
+        }
+
+        AtlasBase atlasBase = AtlasBase.getInstance();
+        if (atlasBase != null) {
+            boolean downloadOnStartup = atlasBase.getConfigManager().getAtlasConfig().getAtlas().getTemplates().isDownloadOnStartup();
+
+            if (downloadOnStartup && groupConfig.getTemplates() != null && !groupConfig.getTemplates().isEmpty()) {
+                TemplateManager templateManager = new TemplateManager();
+                templateManager.applyTemplates(server.getWorkingDirectory(), groupConfig.getTemplates());
+                Logger.debug("Applied templates to server: {}", server.getName());
+            } else {
+                Logger.debug("Skipping template application for server: {} (downloadOnStartup={}, templates={})",
+                        server.getName(), downloadOnStartup, groupConfig.getTemplates() != null ? groupConfig.getTemplates().size() : 0);
+            }
+        }
+    }
+
+    private void validateStartResources(AtlasServer server, StartOptions options) throws Exception {
+        // Nothing for now, might add resource validation in the future
+
+    }
+
+    private AtlasServer createAndStartContainer(AtlasServer server, StartOptions options) throws Exception {
+        try {
+            ScalerConfig.Group groupConfig = this.getGroupConfigForServer(server);
+            if (groupConfig == null) {
+                throw new Exception("No group configuration found for server group: " + server.getGroup());
+            }
+
+            CompletableFuture<AtlasServer> createFuture = this.createServer(groupConfig, server);
+            return createFuture.get(options.getTimeoutSeconds(), java.util.concurrent.TimeUnit.SECONDS);
+        } catch (Exception e) {
+            throw new Exception("Failed to create and start container for server: " + server.getName(), e);
+        }
+    }
+
+    private ScalerConfig.Group getGroupConfigForServer(AtlasServer server) {
+        try {
+            AtlasBase atlasInstance = AtlasBase.getInstance();
+            if (atlasInstance != null && atlasInstance.getScalerManager() != null) {
+                Scaler scaler = atlasInstance.getScalerManager().getScaler(server.getGroup());
+                if (scaler != null) {
+                    return scaler.getScalerConfig().getGroup();
+                }
+            }
+        } catch (Exception e) {
+            Logger.warn("Failed to get group config for server {}: {}", server.getName(), e.getMessage());
+        }
+        return null;
+    }
+
+    private void addServerToTracking(AtlasServer server) {
+        this.servers.put(server.getServerId(), server);
+        Logger.debug("Added server to tracking: {}", server.getName());
+    }
+
+    private void waitForServerReady(AtlasServer server, int timeoutSeconds) throws Exception {
+        long startTime = System.currentTimeMillis();
+        long timeoutMillis = timeoutSeconds * 1000L;
+
+        while (System.currentTimeMillis() - startTime < timeoutMillis) {
+            if (server.getServerInfo() != null && server.getServerInfo().getStatus() == ServerStatus.RUNNING) {
+                Logger.debug("Server ready: {}", server.getName());
+                return;
+            }
+
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new Exception("Interrupted while waiting for server to be ready: " + server.getName());
+            }
+        }
+
+        throw new Exception("Server did not become ready within timeout: " + server.getName());
+    }
+
+    private void cleanupFailedStart(AtlasServer server) {
+        try {
+            Logger.debug("Cleaning up failed start for server: {}", server.getName());
+
+            this.servers.remove(server.getServerId());
+
+            String containerId = this.serverContainerIds.remove(server.getServerId());
+            if (containerId != null) {
+                try {
+                    this.dockerClient.removeContainerCmd(containerId).withForce(true).exec();
+                    Logger.debug("Removed failed container: {}", containerId.substring(0, 12));
+                } catch (Exception e) {
+                    Logger.warn("Failed to remove container during cleanup: {}", e.getMessage());
+                }
+            }
+
+            this.releaseServerPort(server);
+
+        } catch (Exception e) {
+            Logger.error("Error during failed start cleanup for server: {}", server.getName(), e);
         }
     }
 }

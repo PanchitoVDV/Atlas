@@ -586,7 +586,7 @@ public final class Logger {
                 System.err.println("Failed to close log file: " + e.getMessage());
             }
         }
-        
+
         rotateLogFile();
     }
 }

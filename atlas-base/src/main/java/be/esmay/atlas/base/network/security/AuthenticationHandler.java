@@ -1,29 +1,24 @@
 package be.esmay.atlas.base.network.security;
 
 import be.esmay.atlas.base.config.impl.AtlasConfig;
+import be.esmay.atlas.base.network.NettyServer;
 import be.esmay.atlas.base.utils.Logger;
+import lombok.RequiredArgsConstructor;
 
+@RequiredArgsConstructor
 public final class AuthenticationHandler {
 
-    private final AtlasConfig.Network networkConfig;
-
-    public AuthenticationHandler(AtlasConfig.Network networkConfig) {
-        this.networkConfig = networkConfig;
-    }
+    private final NettyServer nettyServer;
 
     public boolean authenticate(String token) {
-        if (!this.networkConfig.isAuthRequired()) {
-            return true;
-        }
-
         if (token == null || token.isEmpty()) {
             Logger.warn("Authentication failed: No token provided");
             return false;
         }
 
-        String expectedToken = this.networkConfig.getNettyKey();
+        String expectedToken = this.nettyServer.getNettyKey();
         if (expectedToken == null || expectedToken.isEmpty()) {
-            Logger.warn("Authentication failed: No netty-key configured");
+            Logger.warn("Authentication failed: No netty-key generated");
             return false;
         }
 

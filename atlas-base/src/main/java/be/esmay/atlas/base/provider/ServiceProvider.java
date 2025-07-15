@@ -29,13 +29,6 @@ public abstract class ServiceProvider {
      */
     public abstract CompletableFuture<AtlasServer> createServer(ScalerConfig.Group groupConfig, AtlasServer atlasServer);
     
-    /**
-     * Starts an existing server that is currently stopped.
-     * 
-     * @param server the server to start
-     * @return a CompletableFuture containing void when complete
-     */
-    public abstract CompletableFuture<Void> startServer(AtlasServer server);
     
     /**
      * Stops a running server gracefully.
@@ -168,6 +161,16 @@ public abstract class ServiceProvider {
      * @return CompletableFuture that completes when the server is fully removed
      */
     public abstract CompletableFuture<Boolean> deleteServerCompletely(AtlasServer server, DeletionOptions options);
+    
+    /**
+     * Unified method to completely start a server with specified options.
+     * This is the single entry point for all server start operations.
+     * 
+     * @param server The server to start
+     * @param options Options controlling how the start is performed
+     * @return CompletableFuture that completes with the started server
+     */
+    public abstract CompletableFuture<AtlasServer> startServerCompletely(AtlasServer server, StartOptions options);
     
     /**
      * Shuts down the service provider and releases all resources.

@@ -1,15 +1,14 @@
 atlas:
   network:
+    bind-address: "0.0.0.0" # Recommended to use 0.0.0.0 because otherwise Docker containers may not be able to access the API. You can whitelist specific networks below.
     port: 8080
+    allowed-networks:
+      - "172.17.0.0/16"  # Default Docker network
+    connection-timeout: 30
+
     api-host: "127.0.0.1" # Use "0.0.0.0" to bind to all interfaces
     api-port: 9090
     api-key: "your-secure-api-key"
-    netty-key: "your-secure-netty-key"
-    bind-address: "0.0.0.0" # Recommended to use 0.0.0.0 because otherwise Docker containers may not be able to access the API. You can whitelist specific networks below.
-    allowed-networks:
-      - "172.17.0.0/16"  # Default Docker network
-    auth-required: true
-    connection-timeout: 30
 
   service-provider:
     type: "docker"

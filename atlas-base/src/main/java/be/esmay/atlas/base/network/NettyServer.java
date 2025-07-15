@@ -2,6 +2,7 @@ package be.esmay.atlas.base.network;
 
 import be.esmay.atlas.base.config.impl.AtlasConfig;
 import be.esmay.atlas.base.network.connection.ConnectionManager;
+import be.esmay.atlas.base.utils.SecureKeyGen;
 import be.esmay.atlas.common.network.packet.Packet;
 import be.esmay.atlas.common.network.packet.packets.ServerAddPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerRemovePacket;
@@ -33,11 +34,14 @@ public final class NettyServer {
     private ChannelFuture channelFuture;
 
     private volatile boolean running = false;
+    private final String nettyKey;
     
     public NettyServer(AtlasConfig.Network networkConfig) {
+        this.nettyKey = SecureKeyGen.generateKey();
+
         this.networkConfig = networkConfig;
         this.connectionManager = new ConnectionManager(networkConfig.getConnectionTimeout());
-        this.authHandler = new AuthenticationHandler(networkConfig);
+        this.authHandler = new AuthenticationHandler(this);
         this.connectionValidator = new ConnectionValidator(networkConfig);
     }
     

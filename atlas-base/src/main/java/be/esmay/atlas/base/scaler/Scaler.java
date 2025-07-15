@@ -5,6 +5,7 @@ import be.esmay.atlas.base.config.impl.ScalerConfig;
 import be.esmay.atlas.base.lifecycle.ServerLifecycleManager;
 import be.esmay.atlas.base.lifecycle.ServerLifecycleService;
 import be.esmay.atlas.base.provider.DeletionOptions;
+import be.esmay.atlas.base.provider.StartOptions;
 import be.esmay.atlas.base.provider.ServiceProvider;
 import be.esmay.atlas.base.utils.Logger;
 import be.esmay.atlas.common.enums.ScaleType;
@@ -45,7 +46,7 @@ public abstract class Scaler {
         this.groupName = groupName;
         this.scalerConfig = scalerConfig;
         this.serviceProvider = AtlasBase.getInstance().getProviderManager().getProvider();
-        this.lifecycleManager = new ServerLifecycleManager(AtlasBase.getInstance());
+        this.lifecycleManager = new ServerLifecycleManager();
         this.lifecycleService = new ServerLifecycleService(AtlasBase.getInstance());
     }
 
@@ -109,18 +110,21 @@ public abstract class Scaler {
         String serverId = this.getNextIdentifier();
         Logger.info("Manually scaling up server: {} for group: {}", serverId, this.groupName);
 
-        CompletableFuture<AtlasServer> createFuture = this.lifecycleManager.createServer(
-                this.serviceProvider,
-                this.scalerConfig.getGroup(),
-                serverId,
-                serverId,
-                serverType,
-                true
-        );
+        AtlasServer server = AtlasServer.builder()
+                .serverId(serverId)
+                .name(serverId)
+                .group(this.groupName)
+                .type(serverType)
+                .createdAt(System.currentTimeMillis())
+                .isManuallyScaled(true)
+                .shutdown(false)
+                .build();
+        
+        CompletableFuture<AtlasServer> createFuture = this.serviceProvider.startServerCompletely(server, StartOptions.userCommand());
 
-        CompletableFuture<Void> acceptFuture = createFuture.thenAccept(server -> {
-            this.addServer(server);
-            Logger.info("Successfully created manual server: {}", server.getName());
+        CompletableFuture<Void> acceptFuture = createFuture.thenAccept(startedServer -> {
+            this.addServer(startedServer);
+            Logger.debug("Successfully created manual server: {}", startedServer.getName());
         });
 
         return acceptFuture.exceptionally(throwable -> {
@@ -161,18 +165,21 @@ public abstract class Scaler {
         String serverId = this.getNextIdentifier();
         Logger.debug("Creating auto-scaled server: {} for group: {}", serverId, this.groupName);
 
-        CompletableFuture<AtlasServer> createFuture = this.lifecycleManager.createServer(
-                this.serviceProvider,
-                this.scalerConfig.getGroup(),
-                serverId,
-                serverId,
-                serverType,
-                false
-        );
+        AtlasServer server = AtlasServer.builder()
+                .serverId(serverId)
+                .name(serverId)
+                .group(this.groupName)
+                .type(serverType)
+                .createdAt(System.currentTimeMillis())
+                .isManuallyScaled(false)
+                .shutdown(false)
+                .build();
+        
+        CompletableFuture<AtlasServer> createFuture = this.serviceProvider.startServerCompletely(server, StartOptions.scalingUp());
 
-        CompletableFuture<Void> acceptFuture = createFuture.thenAccept(server -> {
-            this.addServer(server);
-            Logger.info("Started server: {}", server.getName());
+        CompletableFuture<Void> acceptFuture = createFuture.thenAccept(startedServer -> {
+            this.addServer(startedServer);
+            Logger.debug("Started server: {}", startedServer.getName());
         });
 
         return acceptFuture.exceptionally(throwable -> {
