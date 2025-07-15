@@ -7,7 +7,7 @@ import be.esmay.atlas.base.scaler.Scaler;
 import be.esmay.atlas.base.scaler.ScalerManager;
 import be.esmay.atlas.base.utils.Logger;
 import be.esmay.atlas.common.enums.ServerStatus;
-import be.esmay.atlas.common.models.ServerInfo;
+import be.esmay.atlas.common.models.AtlasServer;
 
 import java.util.Arrays;
 import java.util.List;
@@ -79,8 +79,8 @@ public final class MetricsCommand implements AtlasCommand {
         double totalUtilization = 0.0;
 
         for (Scaler scaler : scalerManager.getScalers()) {
-            List<ServerInfo> autoServers = scaler.getAutoScaledServers();
-            List<ServerInfo> manualServers = scaler.getManuallyScaledServers();
+            List<AtlasServer> autoServers = scaler.getAutoScaledServers();
+            List<AtlasServer> manualServers = scaler.getManuallyScaledServers();
             
             totalServers += scaler.getServers().size();
             totalAutoServers += autoServers.size();
@@ -92,10 +92,10 @@ public final class MetricsCommand implements AtlasCommand {
                 pausedGroups++;
             }
 
-            for (ServerInfo server : scaler.getServers()) {
-                if (server.getStatus() == ServerStatus.RUNNING) {
+            for (AtlasServer server : scaler.getServers()) {
+                if (server.getServerInfo() != null && server.getServerInfo().getStatus() == ServerStatus.RUNNING) {
                     runningServers++;
-                } else if (server.getStatus() == ServerStatus.STARTING) {
+                } else if (server.getServerInfo() != null && server.getServerInfo().getStatus() == ServerStatus.STARTING) {
                     startingServers++;
                 }
             }
@@ -154,8 +154,8 @@ public final class MetricsCommand implements AtlasCommand {
 
         double utilization = scaler.getCurrentUtilization();
         int totalPlayers = scaler.getTotalOnlinePlayers();
-        List<ServerInfo> autoServers = scaler.getAutoScaledServers();
-        List<ServerInfo> manualServers = scaler.getManuallyScaledServers();
+        List<AtlasServer> autoServers = scaler.getAutoScaledServers();
+        List<AtlasServer> manualServers = scaler.getManuallyScaledServers();
         
         Logger.info("Group Statistics:");
         Logger.info("  Current Utilization: " + String.format("%.1f%%", utilization * 100));
@@ -186,8 +186,8 @@ public final class MetricsCommand implements AtlasCommand {
         int totalCapacity = 0;
         int usedCapacity = 0;
         
-        for (ServerInfo server : scaler.getServers()) {
-            switch (server.getStatus()) {
+        for (AtlasServer server : scaler.getServers()) {
+            switch (server.getServerInfo() != null ? server.getServerInfo().getStatus() : ServerStatus.STOPPED) {
                 case RUNNING -> running++;
                 case STARTING -> starting++;
                 case STOPPING -> stopping++;
@@ -195,8 +195,8 @@ public final class MetricsCommand implements AtlasCommand {
                 case ERROR -> error++;
             }
             
-            totalCapacity += server.getMaxPlayers();
-            usedCapacity += server.getOnlinePlayers();
+            totalCapacity += server.getServerInfo() != null ? server.getServerInfo().getMaxPlayers() : 0;
+            usedCapacity += server.getServerInfo() != null ? server.getServerInfo().getOnlinePlayers() : 0;
         }
         
         Logger.info("  Running: " + running);
@@ -227,9 +227,9 @@ public final class MetricsCommand implements AtlasCommand {
         int availableCapacity = 0;
         
         for (Scaler scaler : scalerManager.getScalers()) {
-            for (ServerInfo server : scaler.getServers()) {
-                totalCapacity += server.getMaxPlayers();
-                usedCapacity += server.getOnlinePlayers();
+            for (AtlasServer server : scaler.getServers()) {
+                totalCapacity += server.getServerInfo() != null ? server.getServerInfo().getMaxPlayers() : 0;
+                usedCapacity += server.getServerInfo() != null ? server.getServerInfo().getOnlinePlayers() : 0;
             }
         }
         

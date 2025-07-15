@@ -1,6 +1,7 @@
 package be.esmay.atlas.velocity.api;
 
 import be.esmay.atlas.common.enums.ServerStatus;
+import be.esmay.atlas.common.models.AtlasServer;
 import be.esmay.atlas.common.models.ServerInfo;
 import be.esmay.atlas.velocity.cache.NetworkServerCacheManager;
 import be.esmay.atlas.velocity.proxy.ProxyServerInfoManager;
@@ -29,42 +30,42 @@ public final class AtlasVelocityAPI {
         AtlasVelocityAPI.initialized = false;
     }
     
-    public static Optional<ServerInfo> getServer(String serverId) {
+    public static Optional<AtlasServer> getServer(String serverId) {
         if (!AtlasVelocityAPI.initialized) {
             return Optional.empty();
         }
         return AtlasVelocityAPI.cacheManager.getServer(serverId);
     }
     
-    public static Collection<ServerInfo> getAllServers() {
+    public static Collection<AtlasServer> getAllServers() {
         if (!AtlasVelocityAPI.initialized) {
             return List.of();
         }
         return AtlasVelocityAPI.cacheManager.getAllServers();
     }
     
-    public static List<ServerInfo> getServersByGroup(String group) {
+    public static List<AtlasServer> getServersByGroup(String group) {
         if (!AtlasVelocityAPI.initialized) {
             return List.of();
         }
         return AtlasVelocityAPI.cacheManager.getServersByGroup(group);
     }
     
-    public static List<ServerInfo> getOnlineServers() {
+    public static List<AtlasServer> getOnlineServers() {
         if (!AtlasVelocityAPI.initialized) {
             return List.of();
         }
         return AtlasVelocityAPI.cacheManager.getOnlineServers();
     }
     
-    public static List<ServerInfo> getBackendServers() {
+    public static List<AtlasServer> getBackendServers() {
         if (!AtlasVelocityAPI.initialized) {
             return List.of();
         }
         return AtlasVelocityAPI.cacheManager.getBackendServers();
     }
     
-    public static List<ServerInfo> getProxyServers() {
+    public static List<AtlasServer> getProxyServers() {
         if (!AtlasVelocityAPI.initialized) {
             return List.of();
         }
@@ -96,8 +97,8 @@ public final class AtlasVelocityAPI {
         if (!AtlasVelocityAPI.initialized) {
             return false;
         }
-        Optional<ServerInfo> server = AtlasVelocityAPI.cacheManager.getServer(serverId);
-        return server.isPresent() && server.get().getStatus() == ServerStatus.RUNNING;
+        Optional<AtlasServer> server = AtlasVelocityAPI.cacheManager.getServer(serverId);
+        return server.isPresent() && server.get().getServerInfo() != null && server.get().getServerInfo().getStatus() == ServerStatus.RUNNING;
     }
     
     public static ServerInfo getThisProxyInfo() {

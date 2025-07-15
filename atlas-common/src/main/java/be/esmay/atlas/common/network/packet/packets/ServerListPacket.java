@@ -2,7 +2,7 @@ package be.esmay.atlas.common.network.packet.packets;
 
 import be.esmay.atlas.common.network.packet.Packet;
 import be.esmay.atlas.common.network.packet.PacketHandler;
-import be.esmay.atlas.common.models.ServerInfo;
+import be.esmay.atlas.common.models.AtlasServer;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 import io.netty.buffer.ByteBuf;
@@ -20,9 +20,9 @@ import java.util.List;
 public final class ServerListPacket implements Packet {
     
     private static final Gson GSON = new Gson();
-    private static final Type SERVER_LIST_TYPE = new TypeToken<List<ServerInfo>>(){}.getType();
+    private static final Type SERVER_LIST_TYPE = new TypeToken<List<AtlasServer>>(){}.getType();
     
-    private List<ServerInfo> servers;
+    private List<AtlasServer> atlasServers;
     
     @Override
     public int getId() {
@@ -31,14 +31,14 @@ public final class ServerListPacket implements Packet {
     
     @Override
     public void encode(ByteBuf buffer) {
-        String json = GSON.toJson(this.servers);
+        String json = GSON.toJson(this.atlasServers);
         this.writeString(buffer, json);
     }
     
     @Override
     public void decode(ByteBuf buffer) {
         String json = this.readString(buffer);
-        this.servers = GSON.fromJson(json, SERVER_LIST_TYPE);
+        this.atlasServers = GSON.fromJson(json, SERVER_LIST_TYPE);
     }
     
     @Override

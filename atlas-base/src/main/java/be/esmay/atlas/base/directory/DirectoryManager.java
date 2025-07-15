@@ -2,7 +2,7 @@ package be.esmay.atlas.base.directory;
 
 import be.esmay.atlas.base.utils.Logger;
 import be.esmay.atlas.common.enums.ServerType;
-import be.esmay.atlas.common.models.ServerInfo;
+import be.esmay.atlas.common.models.AtlasServer;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -15,7 +15,7 @@ public final class DirectoryManager {
 
     private static final String SERVERS_DIR = "servers";
 
-    public String createServerDirectory(ServerInfo server) {
+    public String createServerDirectory(AtlasServer server) {
         try {
             String directoryPath = this.generateServerDirectoryPath(server);
             Path serverPath = Paths.get(directoryPath);
@@ -30,7 +30,7 @@ public final class DirectoryManager {
         }
     }
 
-    public void cleanupServerDirectory(ServerInfo server) {
+    public void cleanupServerDirectory(AtlasServer server) {
         if (server.getType() == ServerType.STATIC) {
             Logger.debug("Preserving static server directory: " + server.getServerId());
             return;
@@ -49,12 +49,12 @@ public final class DirectoryManager {
         }
     }
 
-    public boolean directoryExists(ServerInfo server) {
+    public boolean directoryExists(AtlasServer server) {
         String directoryPath = this.generateServerDirectoryPath(server);
         return Files.exists(Paths.get(directoryPath));
     }
 
-    public String generateServerDirectoryPath(ServerInfo server) {
+    public String generateServerDirectoryPath(AtlasServer server) {
         String groupName = server.getGroup();
         String serverName = server.getName();
 

@@ -3,7 +3,7 @@ package be.esmay.atlas.common.network.packet.packets;
 import be.esmay.atlas.common.network.packet.Packet;
 import be.esmay.atlas.common.network.packet.PacketHandler;
 import com.google.gson.Gson;
-import be.esmay.atlas.common.models.ServerInfo;
+import be.esmay.atlas.common.models.AtlasServer;
 import io.netty.buffer.ByteBuf;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -17,7 +17,7 @@ import java.nio.charset.StandardCharsets;
 public final class ServerUpdatePacket implements Packet {
     
     private static final Gson GSON = new Gson();
-    private ServerInfo serverInfo;
+    private AtlasServer atlasServer;
     
     @Override
     public int getId() {
@@ -26,14 +26,14 @@ public final class ServerUpdatePacket implements Packet {
     
     @Override
     public void encode(ByteBuf buffer) {
-        String json = GSON.toJson(this.serverInfo);
+        String json = GSON.toJson(this.atlasServer);
         this.writeString(buffer, json);
     }
     
     @Override
     public void decode(ByteBuf buffer) {
         String json = this.readString(buffer);
-        this.serverInfo = GSON.fromJson(json, ServerInfo.class);
+        this.atlasServer = GSON.fromJson(json, AtlasServer.class);
     }
     
     @Override

@@ -7,6 +7,7 @@ import be.esmay.atlas.base.directory.DirectoryManager;
 import be.esmay.atlas.base.provider.ServiceProvider;
 import be.esmay.atlas.base.utils.Logger;
 import be.esmay.atlas.common.enums.ServerStatus;
+import be.esmay.atlas.common.models.AtlasServer;
 import be.esmay.atlas.common.models.ServerInfo;
 import be.esmay.atlas.common.models.ServerStats;
 import com.github.dockerjava.api.DockerClient;
@@ -63,7 +64,7 @@ public final class DockerServiceProvider extends ServiceProvider {
 
     private final AtlasConfig.Docker dockerConfig;
     private final DockerClient dockerClient;
-    private final Map<String, ServerInfo> servers;
+    private final Map<String, AtlasServer> servers;
     private final Map<String, String> serverContainerIds;
     private final Map<String, Closeable> logStreamConnections;
     private final Map<String, Map<String, Consumer<String>>> logSubscribers;
@@ -74,6 +75,8 @@ public final class DockerServiceProvider extends ServiceProvider {
 
     private static final Map<String, CompletableFuture<Void>> IMAGE_PULL_FUTURES = new ConcurrentHashMap<>();
     private static final Set<String> PULLED_IMAGES = ConcurrentHashMap.newKeySet();
+
+    private final String cachedHostIp;
 
     public DockerServiceProvider(AtlasConfig.ServiceProvider serviceProviderConfig) {
         super("docker");
@@ -119,6 +122,9 @@ public final class DockerServiceProvider extends ServiceProvider {
             throw new RuntimeException("Docker connection failed", e);
         }
 
+        this.cachedHostIp = this.determineHostIpForContainers();
+        Logger.debug("Cached host IP for containers: {}", this.cachedHostIp);
+
         if (this.dockerConfig.isAutoCreateNetwork() && this.dockerConfig.getNetwork() != null) {
             this.createNetworkIfNotExists();
         }
@@ -163,40 +169,44 @@ public final class DockerServiceProvider extends ServiceProvider {
     }
 
     @Override
-    public CompletableFuture<ServerInfo> createServer(ScalerConfig.Group groupConfig, ServerInfo serverInfo) {
+    public CompletableFuture<AtlasServer> createServer(ScalerConfig.Group groupConfig, AtlasServer atlasServer) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                String containerId = this.createDockerContainer(groupConfig, serverInfo);
+                String containerId = this.createDockerContainer(groupConfig, atlasServer);
                 if (containerId == null) {
                     throw new RuntimeException("Failed to create Docker container");
                 }
 
-                this.serverContainerIds.put(serverInfo.getServerId(), containerId);
+                this.serverContainerIds.put(atlasServer.getServerId(), containerId);
                 this.dockerClient.startContainerCmd(containerId).exec();
 
                 InspectContainerResponse containerInfo = this.dockerClient.inspectContainerCmd(containerId).exec();
                 String ipAddress = this.getContainerIpAddress(containerInfo);
-                ServerInfo updatedServer = ServerInfo.builder()
-                        .serverId(serverInfo.getServerId())
-                        .name(serverInfo.getName())
-                        .group(serverInfo.getGroup())
-                        .workingDirectory(serverInfo.getWorkingDirectory())
-                        .address(ipAddress)
-                        .port(25565)
-                        .type(serverInfo.getType())
+
+                ServerInfo serverInfo = ServerInfo.builder()
                         .status(ServerStatus.STARTING)
                         .onlinePlayers(0)
-                        .maxPlayers(serverInfo.getMaxPlayers())
+                        .maxPlayers(atlasServer.getServerInfo() != null ? atlasServer.getServerInfo().getMaxPlayers() : 20)
                         .onlinePlayerNames(new HashSet<>())
-                        .createdAt(serverInfo.getCreatedAt())
-                        .lastHeartbeat(System.currentTimeMillis())
-                        .serviceProviderId(containerId)
-                        .isManuallyScaled(serverInfo.isManuallyScaled())
                         .build();
 
-                this.servers.put(serverInfo.getServerId(), updatedServer);
-                Logger.debug("Created Docker container: {} (ID: {}, Container: {})",
-                        serverInfo.getName(), serverInfo.getServerId(), containerId);
+                AtlasServer updatedServer = AtlasServer.builder()
+                        .serverId(atlasServer.getServerId())
+                        .name(atlasServer.getName())
+                        .group(atlasServer.getGroup())
+                        .workingDirectory(atlasServer.getWorkingDirectory())
+                        .address(ipAddress)
+                        .port(25565)
+                        .type(atlasServer.getType())
+                        .createdAt(atlasServer.getCreatedAt())
+                        .serviceProviderId(containerId)
+                        .isManuallyScaled(atlasServer.isManuallyScaled())
+                        .lastHeartbeat(System.currentTimeMillis())
+                        .serverInfo(serverInfo)
+                        .build();
+
+                this.servers.put(atlasServer.getServerId(), updatedServer);
+                Logger.debug("Created Docker container: {} (ID: {}, Container: {})", atlasServer.getName(), atlasServer.getServerId(), containerId);
 
                 return updatedServer;
             } catch (Exception e) {
@@ -207,19 +217,21 @@ public final class DockerServiceProvider extends ServiceProvider {
     }
 
     @Override
-    public CompletableFuture<Void> startServer(ServerInfo serverInfo) {
+    public CompletableFuture<Void> startServer(AtlasServer atlasServer) {
         return CompletableFuture.runAsync(() -> {
             try {
-                String containerId = this.serverContainerIds.get(serverInfo.getServerId());
+                String containerId = this.serverContainerIds.get(atlasServer.getServerId());
                 if (containerId == null) {
-                    Logger.warn("Container ID not found for server: {}", serverInfo.getServerId());
+                    Logger.warn("Container ID not found for server: {}", atlasServer.getServerId());
                     return;
                 }
 
                 this.dockerClient.startContainerCmd(containerId).exec();
 
-                serverInfo.setStatus(ServerStatus.STARTING);
-                serverInfo.setLastHeartbeat(System.currentTimeMillis());
+                if (atlasServer.getServerInfo() != null) {
+                    atlasServer.getServerInfo().setStatus(ServerStatus.STARTING);
+                    atlasServer.setLastHeartbeat(System.currentTimeMillis());
+                }
 
                 Logger.info("Started Docker container: {}", containerId);
             } catch (Exception e) {
@@ -229,23 +241,27 @@ public final class DockerServiceProvider extends ServiceProvider {
     }
 
     @Override
-    public CompletableFuture<Void> stopServer(ServerInfo serverInfo) {
+    public CompletableFuture<Void> stopServer(AtlasServer atlasServer) {
         return CompletableFuture.runAsync(() -> {
             try {
-                String containerId = this.serverContainerIds.get(serverInfo.getServerId());
+                String containerId = this.serverContainerIds.get(atlasServer.getServerId());
                 if (containerId == null) {
-                    Logger.warn("Container ID not found for server: {}", serverInfo.getServerId());
+                    Logger.warn("Container ID not found for server: {}", atlasServer.getServerId());
                     return;
                 }
 
-                serverInfo.setStatus(ServerStatus.STOPPING);
+                if (atlasServer.getServerInfo() != null) {
+                    atlasServer.getServerInfo().setStatus(ServerStatus.STOPPING);
+                }
 
                 this.dockerClient.stopContainerCmd(containerId).withTimeout(30).exec();
                 this.waitForContainerStop(containerId);
 
-                serverInfo.setStatus(ServerStatus.STOPPED);
-                serverInfo.setOnlinePlayers(0);
-                serverInfo.setOnlinePlayerNames(new HashSet<>());
+                if (atlasServer.getServerInfo() != null) {
+                    atlasServer.getServerInfo().setStatus(ServerStatus.STOPPED);
+                    atlasServer.getServerInfo().setOnlinePlayers(0);
+                    atlasServer.getServerInfo().setOnlinePlayerNames(new HashSet<>());
+                }
 
                 Logger.debug("Stopped Docker container: {}", containerId);
             } catch (Exception e) {
@@ -264,7 +280,19 @@ public final class DockerServiceProvider extends ServiceProvider {
                     return false;
                 }
 
-                ServerInfo serverInfo = this.servers.get(serverId);
+                AtlasServer serverInfo = this.servers.get(serverId);
+                if (serverInfo == null) {
+                    Logger.warn("Server info not found for server: {}", serverId);
+                    return false;
+                }
+
+                if (serverInfo.isShutdown()) {
+                    Logger.debug("Server {} is already being deleted, skipping duplicate deletion", serverId);
+                    return true;
+                }
+
+                serverInfo.setShutdown(true);
+                Logger.debug("Marked server {} as shutting down", serverId);
 
                 Closeable logConnection = this.logStreamConnections.remove(serverId);
                 if (logConnection != null) {
@@ -283,15 +311,21 @@ public final class DockerServiceProvider extends ServiceProvider {
                     String dynamicLabel = labels == null ? null : labels.get("atlas.dynamic");
                     isDynamic = dynamicLabel != null && dynamicLabel.equals("true");
 
-                    if (isDynamic && serverInfo != null && serverInfo.getWorkingDirectory() != null) {
+                    if (isDynamic && serverInfo.getWorkingDirectory() != null) {
                         volumePath = serverInfo.getWorkingDirectory();
                         if (!volumePath.startsWith("/")) {
                             volumePath = System.getProperty("user.dir") + "/" + volumePath;
                         }
                     }
 
-                    if (serverInfo != null && this.isProxyServer(serverInfo.getGroup())) {
+                    if (this.isProxyServer(serverInfo.getGroup())) {
                         this.releaseProxyPortForContainer(containerId);
+                    }
+
+                    if (Boolean.TRUE.equals(containerInfo.getState().getRunning())) {
+                        Logger.debug("Stopping container {} before removal", containerId.substring(0, 12));
+                        this.dockerClient.stopContainerCmd(containerId).exec();
+                        this.waitForContainerStop(containerId);
                     }
                 } catch (Exception e) {
                     Logger.debug("Could not inspect container for cleanup info: {}", e.getMessage());
@@ -374,17 +408,17 @@ public final class DockerServiceProvider extends ServiceProvider {
 
 
     @Override
-    public CompletableFuture<Optional<ServerInfo>> getServer(String serverId) {
+    public CompletableFuture<Optional<AtlasServer>> getServer(String serverId) {
         return CompletableFuture.completedFuture(Optional.ofNullable(this.servers.get(serverId)));
     }
 
     @Override
-    public CompletableFuture<List<ServerInfo>> getAllServers() {
+    public CompletableFuture<List<AtlasServer>> getAllServers() {
         return CompletableFuture.completedFuture(new ArrayList<>(this.servers.values()));
     }
 
     @Override
-    public CompletableFuture<List<ServerInfo>> getServersByGroup(String group) {
+    public CompletableFuture<List<AtlasServer>> getServersByGroup(String group) {
         return CompletableFuture.supplyAsync(() -> this.servers.values().stream()
                 .filter(server -> server.getGroup().equals(group))
                 .collect(Collectors.toList())
@@ -410,15 +444,15 @@ public final class DockerServiceProvider extends ServiceProvider {
     }
 
     @Override
-    public CompletableFuture<Boolean> updateServerStatus(String serverId, ServerInfo updatedInfo) {
+    public CompletableFuture<Boolean> updateServerStatus(String serverId, AtlasServer updatedServer) {
         return CompletableFuture.supplyAsync(() -> {
             if (!this.servers.containsKey(serverId)) {
                 Logger.warn("Server not found for update: {}", serverId);
                 return false;
             }
 
-            this.servers.put(serverId, updatedInfo);
-            Logger.debug("Updated server status for: {}", updatedInfo.getName());
+            this.servers.put(serverId, updatedServer);
+            Logger.debug("Updated server status for: {}", updatedServer.getName());
             return true;
         });
     }
@@ -527,15 +561,15 @@ public final class DockerServiceProvider extends ServiceProvider {
         });
     }
 
-    private String createDockerContainer(ScalerConfig.Group groupConfig, ServerInfo serverInfo) {
+    private String createDockerContainer(ScalerConfig.Group groupConfig, AtlasServer atlasServer) {
         try {
             ScalerConfig.Docker dockerGroupConfig = groupConfig.getServiceProvider().getDocker();
 
             List<String> envVars = new ArrayList<>();
             envVars.add("EULA=TRUE");
-            envVars.add("SERVER_NAME=" + serverInfo.getName());
-            envVars.add("SERVER_GROUP=" + serverInfo.getGroup());
-            envVars.add("SERVER_UUID=" + serverInfo.getServerId());
+            envVars.add("SERVER_NAME=" + atlasServer.getName());
+            envVars.add("SERVER_GROUP=" + atlasServer.getGroup());
+            envVars.add("SERVER_UUID=" + atlasServer.getServerId());
             envVars.add("ATLAS_MANAGED=true");
             envVars.add("SERVER_TYPE=" + groupConfig.getServer().getType());
 
@@ -554,25 +588,25 @@ public final class DockerServiceProvider extends ServiceProvider {
 
             Map<String, String> labels = new HashMap<>();
             labels.put("atlas.managed", "true");
-            labels.put("atlas.server-id", serverInfo.getServerId());
-            labels.put("atlas.group", serverInfo.getGroup());
-            labels.put("atlas.server-name", serverInfo.getName());
+            labels.put("atlas.server-id", atlasServer.getServerId());
+            labels.put("atlas.group", atlasServer.getGroup());
+            labels.put("atlas.server-name", atlasServer.getName());
             labels.put("atlas.version", "1.0");
             labels.put("atlas.server-type", groupConfig.getServer().getType());
-            labels.put("atlas.dynamic", String.valueOf(serverInfo.getType().name().equals("DYNAMIC")));
+            labels.put("atlas.dynamic", String.valueOf(atlasServer.getType().name().equals("DYNAMIC")));
 
             CreateContainerCmd createCmd = this.dockerClient.createContainerCmd(dockerGroupConfig.getImage())
-                    .withName("atlas-" + serverInfo.getName())
+                    .withName("atlas-" + atlasServer.getServerId())
                     .withLabels(labels)
                     .withEnv(envVars)
-                    .withBinds(this.createBinds(dockerGroupConfig, serverInfo))
+                    .withBinds(this.createBinds(dockerGroupConfig, atlasServer))
                     .withNetworkMode(this.dockerConfig.getNetwork());
 
-            if (this.isProxyServer(serverInfo.getGroup())) {
+            if (this.isProxyServer(atlasServer.getGroup())) {
                 int hostPort = this.getNextAvailableProxyPort();
                 createCmd = createCmd.withPortBindings(PortBinding.parse(hostPort + ":25565"));
 
-                Logger.debug("Exposing proxy {} on host port {}", serverInfo.getName(), hostPort);
+                Logger.debug("Exposing proxy {} on host port {}", atlasServer.getName(), hostPort);
             }
 
             if (dockerGroupConfig.getMemory() != null && !dockerGroupConfig.getMemory().isEmpty()) {
@@ -595,16 +629,16 @@ public final class DockerServiceProvider extends ServiceProvider {
         }
     }
 
-    private Bind[] createBinds(ScalerConfig.Docker dockerConfig, ServerInfo serverInfo) {
+    private Bind[] createBinds(ScalerConfig.Docker dockerConfig, AtlasServer atlasServer) {
         List<Bind> binds = new ArrayList<>();
 
-        if (serverInfo.getWorkingDirectory() != null) {
+        if (atlasServer.getWorkingDirectory() != null) {
             String mountPath = dockerConfig.getVolumeMountPath();
             if (mountPath == null || mountPath.isEmpty()) {
                 mountPath = "/data";
             }
 
-            String absoluteWorkingDir = serverInfo.getWorkingDirectory();
+            String absoluteWorkingDir = atlasServer.getWorkingDirectory();
             if (!absoluteWorkingDir.startsWith("/")) {
                 absoluteWorkingDir = System.getProperty("user.dir") + "/" + absoluteWorkingDir;
             }
@@ -744,6 +778,10 @@ public final class DockerServiceProvider extends ServiceProvider {
     }
 
     private String getHostIpForContainers() {
+        return this.cachedHostIp;
+    }
+
+    private String determineHostIpForContainers() {
         try {
             NetworkInterface networkInterface = NetworkInterface.getByName("eth0");
             if (networkInterface == null) {

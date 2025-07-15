@@ -3,22 +3,22 @@ package be.esmay.atlas.base.scaler;
 import be.esmay.atlas.base.AtlasBase;
 import be.esmay.atlas.base.config.impl.ScalerConfig;
 import be.esmay.atlas.base.lifecycle.ServerLifecycleManager;
+import be.esmay.atlas.base.lifecycle.ServerLifecycleService;
 import be.esmay.atlas.base.provider.ServiceProvider;
 import be.esmay.atlas.base.utils.Logger;
 import be.esmay.atlas.common.enums.ScaleType;
 import be.esmay.atlas.common.enums.ServerStatus;
 import be.esmay.atlas.common.enums.ServerType;
+import be.esmay.atlas.common.models.AtlasServer;
 import be.esmay.atlas.common.models.ServerInfo;
 import lombok.Getter;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -31,7 +31,8 @@ public abstract class Scaler {
     protected final ScalerConfig scalerConfig;
     protected final ServiceProvider serviceProvider;
     protected final ServerLifecycleManager lifecycleManager;
-    protected final Map<String, ServerInfo> servers = new ConcurrentHashMap<>();
+    protected final ServerLifecycleService lifecycleService;
+    protected final Map<String, AtlasServer> servers = new ConcurrentHashMap<>();
 
     protected volatile boolean shutdown = false;
     protected volatile boolean paused = false;
@@ -43,6 +44,7 @@ public abstract class Scaler {
         this.scalerConfig = scalerConfig;
         this.serviceProvider = AtlasBase.getInstance().getProviderManager().getProvider();
         this.lifecycleManager = new ServerLifecycleManager(AtlasBase.getInstance());
+        this.lifecycleService = new ServerLifecycleService(AtlasBase.getInstance());
     }
 
     public abstract ScaleType needsScaling();
@@ -76,45 +78,43 @@ public abstract class Scaler {
 
         switch (scaleType) {
             case UP -> {
-                Logger.debug("Scaling up servers for group: {} (current utilization: {}%)",
-                        this.groupName, String.format("%.2f", this.getCurrentUtilization() * 100));
+                Logger.debug("Scaling up servers for group: {} (current utilization: {}%)", this.groupName, String.format("%.2f", this.getCurrentUtilization() * 100));
 
                 CompletableFuture<Void> upscaleFuture = this.autoUpscale();
-                
+
                 upscaleFuture.exceptionally(throwable -> {
                     Logger.error("Failed to auto-scale up servers for group: {}", this.groupName, throwable);
                     return null;
                 });
             }
             case DOWN -> {
-                Logger.debug("Scaling down servers for group: {} (current utilization: {}%)",
-                        this.groupName, String.format("%.2f", this.getCurrentUtilization() * 100));
+                Logger.debug("Scaling down servers for group: {} (current utilization: {}%)", this.groupName, String.format("%.2f", this.getCurrentUtilization() * 100));
                 this.autoScaleDown();
             }
-            case NONE -> Logger.debug("No scaling needed for group: {} (current utilization: {}%)",
-                    this.groupName, String.format("%.2f", this.getCurrentUtilization() * 100));
+            case NONE ->
+                    Logger.debug("No scaling needed for group: {} (current utilization: {}%)", this.groupName, String.format("%.2f", this.getCurrentUtilization() * 100));
         }
     }
 
     public CompletableFuture<Void> upscale() {
         ServerType serverType = ServerType.valueOf(this.scalerConfig.getGroup().getServer().getType().toUpperCase());
-        String serverId = this.getNextIdentifier(); // Use existing logic
+        String serverId = this.getNextIdentifier();
         Logger.info("Manually scaling up server: {} for group: {}", serverId, this.groupName);
 
-        CompletableFuture<ServerInfo> createFuture = this.lifecycleManager.createServer(
-            this.serviceProvider, 
-            this.scalerConfig.getGroup(), 
-            serverId, 
-            serverId, 
-            serverType, 
-            true
+        CompletableFuture<AtlasServer> createFuture = this.lifecycleManager.createServer(
+                this.serviceProvider,
+                this.scalerConfig.getGroup(),
+                serverId,
+                serverId,
+                serverType,
+                true
         );
-        
+
         CompletableFuture<Void> acceptFuture = createFuture.thenAccept(server -> {
             this.addServer(server);
             Logger.info("Successfully created manual server: {}", server.getName());
         });
-        
+
         return acceptFuture.exceptionally(throwable -> {
             Logger.error("Failed to create manual server: {}", serverId, throwable);
             return null;
@@ -127,8 +127,7 @@ public abstract class Scaler {
 
         if (currentAutoServers < minServers) {
             int serversToCreate = minServers - currentAutoServers;
-            Logger.debug("Scaling up to minimum servers for group: {}. Creating {} servers to reach minimum of {}",
-                    this.groupName, serversToCreate, minServers);
+            Logger.debug("Scaling up to minimum servers for group: {}. Creating {} servers to reach minimum of {}", this.groupName, serversToCreate, minServers);
 
             List<CompletableFuture<Void>> futures = new ArrayList<>();
             for (int i = 0; i < serversToCreate; i++) {
@@ -136,7 +135,7 @@ public abstract class Scaler {
             }
 
             CompletableFuture<Void> allFuture = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
-            
+
             return allFuture.thenRun(() -> this.lastScaleUpTime = Instant.now());
         }
 
@@ -145,7 +144,7 @@ public abstract class Scaler {
         }
 
         CompletableFuture<Void> createFuture = this.createAutoScaledServer();
-        
+
         return createFuture.thenRun(() -> this.lastScaleUpTime = Instant.now());
     }
 
@@ -154,20 +153,20 @@ public abstract class Scaler {
         String serverId = this.getNextIdentifier();
         Logger.debug("Creating auto-scaled server: {} for group: {}", serverId, this.groupName);
 
-        CompletableFuture<ServerInfo> createFuture = this.lifecycleManager.createServer(
-            this.serviceProvider, 
-            this.scalerConfig.getGroup(), 
-            serverId, 
-            serverId, 
-            serverType, 
-            false
+        CompletableFuture<AtlasServer> createFuture = this.lifecycleManager.createServer(
+                this.serviceProvider,
+                this.scalerConfig.getGroup(),
+                serverId,
+                serverId,
+                serverType,
+                false
         );
-        
+
         CompletableFuture<Void> acceptFuture = createFuture.thenAccept(server -> {
             this.addServer(server);
             Logger.info("Started server: {}", server.getName());
         });
-        
+
         return acceptFuture.exceptionally(throwable -> {
             Logger.error("Failed to create auto-scaled server: {}", serverId, throwable);
             return null;
@@ -178,15 +177,14 @@ public abstract class Scaler {
         if (!this.canScaleDown())
             return;
 
-        ServerInfo serverToRemove = this.getAutoScaledServers().stream()
-                .filter(server -> server.getStatus() == ServerStatus.RUNNING)
-                .min(Comparator.comparingInt(ServerInfo::getOnlinePlayers)
-                        .thenComparing(ServerInfo::getCreatedAt, Comparator.reverseOrder()))
+        AtlasServer serverToRemove = this.getAutoScaledServers().stream()
+                .filter(server -> server.getServerInfo() != null && server.getServerInfo().getStatus() == ServerStatus.RUNNING)
+                .min(Comparator.comparingInt((AtlasServer server) -> server.getServerInfo() != null ? server.getServerInfo().getOnlinePlayers() : 0)
+                        .thenComparing(AtlasServer::getCreatedAt, Comparator.reverseOrder()))
                 .orElse(null);
 
         if (serverToRemove != null) {
-            Logger.info("Auto-scaling down server: {} (players: {}) from group: {}",
-                    serverToRemove.getName(), serverToRemove.getOnlinePlayers(), this.groupName);
+            Logger.info("Auto-scaling down server: {} (players: {}) from group: {}", serverToRemove.getName(), serverToRemove.getServerInfo() != null ? serverToRemove.getServerInfo().getOnlinePlayers() : 0, this.groupName);
 
             this.remove(serverToRemove);
             this.lastScaleDownTime = Instant.now();
@@ -214,16 +212,15 @@ public abstract class Scaler {
     }
 
     private void manualScaleDown() {
-        ServerInfo serverToRemove = this.servers.values().stream()
-                .filter(server -> server.getStatus() == ServerStatus.RUNNING)
-                .min(Comparator.comparingInt(ServerInfo::getOnlinePlayers)
-                        .thenComparing(ServerInfo::getCreatedAt, Comparator.reverseOrder()))
+        AtlasServer serverToRemove = this.servers.values().stream()
+                .filter(server -> server.getServerInfo() != null && server.getServerInfo().getStatus() == ServerStatus.RUNNING)
+                .min(Comparator.comparingInt((AtlasServer server) -> server.getServerInfo() != null ? server.getServerInfo().getOnlinePlayers() : 0)
+                        .thenComparing(AtlasServer::getCreatedAt, Comparator.reverseOrder()))
                 .orElse(null);
 
         if (serverToRemove != null) {
             String serverType = serverToRemove.isManuallyScaled() ? "manual" : "auto-scaled";
-            Logger.info("Manually scaling down {} server: {} (players: {}) from group: {}",
-                    serverType, serverToRemove.getName(), serverToRemove.getOnlinePlayers(), this.groupName);
+            Logger.info("Manually scaling down {} server: {} (players: {}) from group: {}", serverType, serverToRemove.getName(), serverToRemove.getServerInfo() != null ? serverToRemove.getServerInfo().getOnlinePlayers() : 0, this.groupName);
 
             this.remove(serverToRemove);
         } else {
@@ -235,11 +232,9 @@ public abstract class Scaler {
         Logger.info("Shutting down scaler for group: {}", this.groupName);
         this.shutdown = true;
 
-        CompletableFuture.allOf(
-                this.servers.values().stream()
-                        .map(this::shutdownServer)
-                        .toArray(CompletableFuture[]::new)
-        ).join();
+        CompletableFuture.allOf(this.servers.values().stream()
+                .map(this::shutdownServer)
+                .toArray(CompletableFuture[]::new)).join();
 
         this.servers.clear();
     }
@@ -261,7 +256,7 @@ public abstract class Scaler {
     }
 
     public void removeManualServer(String serverId) {
-        ServerInfo server = this.servers.get(serverId);
+        AtlasServer server = this.servers.get(serverId);
         if (server != null && server.isManuallyScaled()) {
             Logger.info("Manually removing server: {} from group: {}", server.getName(), this.groupName);
             this.remove(server);
@@ -270,40 +265,27 @@ public abstract class Scaler {
         }
     }
 
-    public void remove(ServerInfo server) {
+    public void remove(AtlasServer server) {
         if (server == null || !this.servers.containsKey(server.getServerId()))
             return;
 
-        Logger.debug("Removing server: {} from group: {}", server.getName(), this.groupName);
-
-        this.shutdownServer(server).thenRun(() -> {
-            this.servers.remove(server.getServerId());
-            Logger.info("Stopped server: {}", server.getName());
+        this.lifecycleService.removeServer(server).thenRun(() -> {
+            Logger.debug("Completed removal of server: {}", server.getName());
         }).exceptionally(throwable -> {
-            Logger.error("Failed to stop server {}, keeping in tracking", server.getName(), throwable);
+            Logger.error("Failed to remove server {}", server.getName(), throwable);
             return null;
         });
     }
 
-    public CompletableFuture<Void> removeAsync(ServerInfo server) {
+    public CompletableFuture<Void> removeAsync(AtlasServer server) {
         if (server == null || !this.servers.containsKey(server.getServerId())) {
             return CompletableFuture.completedFuture(null);
         }
 
-        Logger.debug("Removing server: {} from group: {}", server.getName(), this.groupName);
-
-        CompletableFuture<Void> deleteFuture = this.lifecycleManager.deleteServerCompletely(this.serviceProvider, server);
-        CompletableFuture<Void> completionFuture = deleteFuture.thenRun(() -> {
-            this.servers.remove(server.getServerId());
-            Logger.info("Stopped server: {}", server.getName());
-        });
-        return completionFuture.exceptionally(throwable -> {
-            Logger.error("Failed to stop server {}, keeping in tracking", server.getName(), throwable);
-            return null;
-        });
+        return this.lifecycleService.removeServer(server);
     }
 
-    private CompletableFuture<Void> shutdownServer(ServerInfo server) {
+    private CompletableFuture<Void> shutdownServer(AtlasServer server) {
         CompletableFuture<Void> deleteFuture = this.lifecycleManager.deleteServerCompletely(this.serviceProvider, server);
         CompletableFuture<Void> completionFuture = deleteFuture.thenRun(() -> Logger.debug("Successfully removed server: {}", server.getName()));
         return completionFuture.exceptionally(throwable -> {
@@ -312,61 +294,73 @@ public abstract class Scaler {
         });
     }
 
-    public List<ServerInfo> getServers() {
+    public List<AtlasServer> getServers() {
         return new ArrayList<>(this.servers.values());
     }
 
-    public List<ServerInfo> getAutoScaledServers() {
+    public AtlasServer getServer(String serverId) {
+        return this.servers.get(serverId);
+    }
+
+    public void removeServerFromTracking(String serverId) {
+        this.servers.remove(serverId);
+    }
+
+    public List<AtlasServer> getAutoScaledServers() {
         return this.servers.values().stream()
                 .filter(server -> !server.isManuallyScaled())
                 .collect(Collectors.toList());
     }
 
-    public List<ServerInfo> getManuallyScaledServers() {
+    public List<AtlasServer> getManuallyScaledServers() {
         return this.servers.values().stream()
-                .filter(ServerInfo::isManuallyScaled)
+                .filter(AtlasServer::isManuallyScaled)
                 .collect(Collectors.toList());
     }
 
     public int getTotalOnlinePlayers() {
         return this.servers.values().stream()
-                .mapToInt(ServerInfo::getOnlinePlayers)
+                .filter(server -> server.getServerInfo() != null)
+                .mapToInt(server -> server.getServerInfo().getOnlinePlayers())
                 .sum();
     }
 
     public int getAutoScaledOnlinePlayers() {
         return this.getAutoScaledServers().stream()
-                .mapToInt(ServerInfo::getOnlinePlayers)
+                .filter(server -> server.getServerInfo() != null)
+                .mapToInt(server -> server.getServerInfo().getOnlinePlayers())
                 .sum();
     }
 
     public double getCurrentUtilization() {
-        List<ServerInfo> autoServers = this.getAutoScaledServers();
+        List<AtlasServer> autoServers = this.getAutoScaledServers();
         if (autoServers.isEmpty())
             return 0.0;
 
-        List<ServerInfo> runningServers = autoServers.stream()
-                .filter(server -> server.getStatus() == ServerStatus.RUNNING)
+        List<AtlasServer> runningServers = autoServers.stream()
+                .filter(server -> server.getServerInfo() != null && server.getServerInfo().getStatus() == ServerStatus.RUNNING)
                 .toList();
-        
+
         int avgMaxPlayers;
         if (!runningServers.isEmpty()) {
             avgMaxPlayers = runningServers.stream()
-                    .mapToInt(ServerInfo::getMaxPlayers)
+                    .mapToInt(server -> server.getServerInfo().getMaxPlayers())
                     .sum() / runningServers.size();
         } else {
             avgMaxPlayers = 20;
         }
-        
+
         int totalPlayers = 0;
         int totalCapacity = 0;
-        
-        for (ServerInfo server : autoServers) {
-            totalPlayers += server.getOnlinePlayers();
-            
-            if (server.getStatus() == ServerStatus.RUNNING) {
-                totalCapacity += server.getMaxPlayers();
-            } else if (server.getStatus() == ServerStatus.STARTING) {
+
+        for (AtlasServer server : autoServers) {
+            if (server.getServerInfo() == null) continue;
+
+            totalPlayers += server.getServerInfo().getOnlinePlayers();
+
+            if (server.getServerInfo().getStatus() == ServerStatus.RUNNING) {
+                totalCapacity += server.getServerInfo().getMaxPlayers();
+            } else if (server.getServerInfo().getStatus() == ServerStatus.STARTING) {
                 totalCapacity += avgMaxPlayers;
             }
         }
@@ -391,55 +385,84 @@ public abstract class Scaler {
         return !this.shutdown && this.getAutoScaledServers().size() > this.getMinServers();
     }
 
-    public void addServer(ServerInfo server) {
+    public void addServer(AtlasServer server) {
         this.servers.put(server.getServerId(), server);
 
-        if (server.getStatus() == ServerStatus.RUNNING) {
+        if (server.getServerInfo() != null && server.getServerInfo().getStatus() == ServerStatus.RUNNING) {
             AtlasBase atlasInstance = AtlasBase.getInstance();
             if (atlasInstance != null && atlasInstance.getNettyServer() != null) {
                 atlasInstance.getNettyServer().broadcastServerAdd(server);
             }
         }
-    }
-
-    public void updateServerPlayerCount(String serverId, int playerCount) {
-        ServerInfo server = this.servers.get(serverId);
-        if (server == null)
-            return;
-
-        server.setOnlinePlayers(playerCount);
-        server.setLastHeartbeat(System.currentTimeMillis());
-    }
-
-    public void updateServerCapacity(String serverId, int maxPlayers) {
-        ServerInfo server = this.servers.get(serverId);
-        if (server == null)
-            return;
-
-        server.setMaxPlayers(maxPlayers);
-        server.setLastHeartbeat(System.currentTimeMillis());
     }
 
     public void updateServerStatus(String serverId, ServerStatus status) {
-        ServerInfo server = this.servers.get(serverId);
-        if (server == null)
+        AtlasServer server = this.servers.get(serverId);
+        if (server == null || server.getServerInfo() == null)
             return;
 
-        ServerStatus oldStatus = server.getStatus();
-        server.setStatus(status);
-        server.setLastHeartbeat(System.currentTimeMillis());
+        ServerStatus oldStatus = server.getServerInfo().getStatus();
+        server.getServerInfo().setStatus(status);
 
         if (oldStatus != ServerStatus.RUNNING && status == ServerStatus.RUNNING) {
             AtlasBase atlasInstance = AtlasBase.getInstance();
-            if (atlasInstance != null && atlasInstance.getNettyServer() != null) {
-                atlasInstance.getNettyServer().broadcastServerAdd(server);
-            }
-        } else if (oldStatus == ServerStatus.RUNNING && (status == ServerStatus.STOPPED || status == ServerStatus.ERROR)) {
-            AtlasBase atlasInstance = AtlasBase.getInstance();
-            if (atlasInstance != null && atlasInstance.getNettyServer() != null) {
-                atlasInstance.getNettyServer().broadcastServerRemove(serverId, "Server status changed to " + status);
-            }
+            if (atlasInstance == null || atlasInstance.getNettyServer() == null)
+                return;
+
+            atlasInstance.getNettyServer().broadcastServerAdd(server);
+            return;
         }
+
+        if (oldStatus == ServerStatus.RUNNING && (status == ServerStatus.STOPPED || status == ServerStatus.ERROR)) {
+            AtlasBase atlasInstance = AtlasBase.getInstance();
+            if (atlasInstance == null || atlasInstance.getNettyServer() == null)
+                return;
+
+            atlasInstance.getNettyServer().broadcastServerRemove(serverId, "Server status changed to " + status);
+        }
+    }
+
+    public void updateServerInfo(String serverId, ServerInfo serverInfo) {
+        AtlasServer server = this.servers.get(serverId);
+        if (server == null)
+            return;
+
+        ServerStatus oldStatus = server.getServerInfo() != null ? server.getServerInfo().getStatus() : null;
+        server.setServerInfo(serverInfo);
+        server.setLastHeartbeat(System.currentTimeMillis());
+
+        ServerStatus newStatus = serverInfo.getStatus();
+        if (oldStatus != ServerStatus.RUNNING && newStatus == ServerStatus.RUNNING) {
+            AtlasBase atlasInstance = AtlasBase.getInstance();
+            if (atlasInstance == null || atlasInstance.getNettyServer() == null)
+                return;
+
+            atlasInstance.getNettyServer().broadcastServerAdd(server);
+            return;
+        }
+
+        if (oldStatus == ServerStatus.RUNNING && (newStatus == ServerStatus.STOPPED || newStatus == ServerStatus.ERROR)) {
+            AtlasBase atlasInstance = AtlasBase.getInstance();
+            if (atlasInstance == null || atlasInstance.getNettyServer() == null)
+                return;
+
+            atlasInstance.getNettyServer().broadcastServerRemove(serverId, "Server status changed to " + newStatus);
+            return;
+        }
+
+        AtlasBase atlasInstance = AtlasBase.getInstance();
+        if (atlasInstance == null || atlasInstance.getNettyServer() == null)
+            return;
+
+        atlasInstance.getNettyServer().broadcastServerUpdate(server);
+    }
+
+    public void updateServerHeartbeat(String serverId) {
+        AtlasServer server = this.servers.get(serverId);
+        if (server == null)
+            return;
+
+        server.setLastHeartbeat(System.currentTimeMillis());
     }
 
     protected boolean shouldScaleUp() {
@@ -448,25 +471,25 @@ public abstract class Scaler {
         int cooldownSeconds = this.getCooldownSeconds();
 
         int startingServers = (int) this.getAutoScaledServers().stream()
-                .filter(server -> server.getStatus() == ServerStatus.STARTING)
+                .filter(server -> server.getServerInfo() != null && server.getServerInfo().getStatus() == ServerStatus.STARTING)
                 .count();
-        
+
         boolean thresholdMet = utilization >= threshold;
         boolean canScale = this.canScaleUp();
         boolean cooldownExpired = Instant.now().isAfter(this.lastScaleUpTime.plusSeconds(cooldownSeconds));
-        
+
         if (startingServers > 0) {
             thresholdMet = utilization >= 0.9;
 
             if (thresholdMet) {
-                Logger.debug("High utilization ({}%) detected with {} starting servers, allowing scale up", 
+                Logger.debug("High utilization ({}%) detected with {} starting servers, allowing scale up",
                         String.format("%.1f", utilization * 100), startingServers);
             }
         }
-        
+
         if (thresholdMet && canScale && !cooldownExpired) {
-            Logger.debug("Scale up conditions met for {} but in cooldown for {} more seconds", 
-                    this.groupName, 
+            Logger.debug("Scale up conditions met for {} but in cooldown for {} more seconds",
+                    this.groupName,
                     cooldownSeconds - Instant.now().getEpochSecond() + this.lastScaleUpTime.getEpochSecond());
         }
 
@@ -477,20 +500,20 @@ public abstract class Scaler {
         double utilization = this.getCurrentUtilization();
         double threshold = this.scalerConfig.getGroup().getScaling().getConditions().getScaleDownThreshold();
         int cooldownSeconds = this.getCooldownSeconds();
-        
+
         boolean thresholdMet = utilization <= threshold;
         boolean canScale = this.canScaleDown();
         boolean cooldownExpired = Instant.now().isAfter(this.lastScaleDownTime.plusSeconds(cooldownSeconds));
-        
+
         if (thresholdMet && canScale && !cooldownExpired) {
-            Logger.debug("Scale down conditions met for {} but in cooldown for {} more seconds", 
-                    this.groupName, 
+            Logger.debug("Scale down conditions met for {} but in cooldown for {} more seconds",
+                    this.groupName,
                     cooldownSeconds - Instant.now().getEpochSecond() + this.lastScaleDownTime.getEpochSecond());
         }
 
         return thresholdMet && canScale && cooldownExpired;
     }
-    
+
     protected int getCooldownSeconds() {
         return AtlasBase.getInstance().getConfigManager().getAtlasConfig()
                 .getAtlas().getScaling().getCooldown();
@@ -498,7 +521,7 @@ public abstract class Scaler {
 
     protected int getEmptyServerCount() {
         return (int) this.getAutoScaledServers().stream()
-                .filter(server -> server.getOnlinePlayers() == 0)
+                .filter(server -> server.getServerInfo() != null && server.getServerInfo().getOnlinePlayers() == 0)
                 .count();
     }
 
@@ -542,16 +565,16 @@ public abstract class Scaler {
 
         return 0;
     }
-    
+
     public String getScalingStatus() {
         double utilization = this.getCurrentUtilization();
         int autoServers = this.getAutoScaledServers().size();
         int manualServers = this.getManuallyScaledServers().size();
         int totalPlayers = this.getTotalOnlinePlayers();
         int maxServers = this.getMaxServers();
-        
+
         String maxDisplay = maxServers == -1 ? "∞" : String.valueOf(maxServers);
-        
+
         return String.format("Group: %s | Utilization: %.1f%% | Auto: %d/%s | Manual: %d | Players: %d",
                 this.groupName,
                 utilization * 100,
@@ -563,23 +586,23 @@ public abstract class Scaler {
 
     public void checkHeartbeats() {
         long currentTime = System.currentTimeMillis();
-        List<ServerInfo> serversToRemove = new ArrayList<>();
-        
-        for (ServerInfo server : this.servers.values()) {
+        List<AtlasServer> serversToRemove = new ArrayList<>();
+
+        for (AtlasServer server : this.servers.values()) {
+            if (server.getServerInfo() == null) continue;
+
             long timeSinceLastHeartbeat = currentTime - server.getLastHeartbeat();
-            
-            if (server.getStatus() == ServerStatus.RUNNING && timeSinceLastHeartbeat > 15000) {
-                Logger.warn("Server {} hasn't sent heartbeat in {} seconds, marking for removal", 
-                        server.getName(), timeSinceLastHeartbeat / 1000);
+
+            if (server.getServerInfo().getStatus() == ServerStatus.RUNNING && timeSinceLastHeartbeat > 15000) {
+                Logger.warn("Server {} hasn't sent heartbeat in {} seconds, marking for removal", server.getName(), timeSinceLastHeartbeat / 1000);
                 serversToRemove.add(server);
-            } else if (server.getStatus() == ServerStatus.STARTING && timeSinceLastHeartbeat > 180000) {
-                Logger.warn("Starting server {} hasn't sent heartbeat in {} seconds, marking for removal", 
-                        server.getName(), timeSinceLastHeartbeat / 1000);
+            } else if (server.getServerInfo().getStatus() == ServerStatus.STARTING && timeSinceLastHeartbeat > 180000) {
+                Logger.warn("Starting server {} hasn't sent heartbeat in {} seconds, marking for removal", server.getName(), timeSinceLastHeartbeat / 1000);
                 serversToRemove.add(server);
             }
         }
-        
-        for (ServerInfo server : serversToRemove) {
+
+        for (AtlasServer server : serversToRemove) {
             this.remove(server);
         }
     }

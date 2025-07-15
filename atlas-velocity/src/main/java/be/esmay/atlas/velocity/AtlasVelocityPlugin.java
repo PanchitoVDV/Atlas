@@ -14,7 +14,6 @@ import com.velocitypowered.api.plugin.Plugin;
 import com.velocitypowered.api.plugin.annotation.DataDirectory;
 import com.velocitypowered.api.proxy.ProxyServer;
 import lombok.Getter;
-import org.checkerframework.checker.units.qual.A;
 import org.slf4j.Logger;
 
 import java.nio.file.Path;
@@ -79,7 +78,7 @@ public final class AtlasVelocityPlugin {
 
         this.cacheManager = new NetworkServerCacheManager();
         this.cacheManager.setProxyServer(this.proxyServer);
-        this.serverInfoManager = new ProxyServerInfoManager(serverId, this.proxyServer);
+        this.serverInfoManager = new ProxyServerInfoManager(this.proxyServer);
         this.registryManager = new VelocityServerRegistryManager(this.proxyServer);
 
         this.networkClient = new AtlasNetworkClient(
@@ -93,7 +92,7 @@ public final class AtlasVelocityPlugin {
                 this.logger
         );
 
-        this.playerEventListener = new ProxyPlayerEventListener(this.serverInfoManager, this.networkClient);
+        this.playerEventListener = new ProxyPlayerEventListener(this.networkClient);
         this.proxyServer.getEventManager().register(this, this.playerEventListener);
 
         AtlasVelocityAPI.initialize(this.cacheManager, this.serverInfoManager);

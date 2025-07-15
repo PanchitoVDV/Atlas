@@ -7,7 +7,7 @@ import be.esmay.atlas.base.scaler.Scaler;
 import be.esmay.atlas.base.scaler.ScalerManager;
 import be.esmay.atlas.base.utils.Logger;
 import be.esmay.atlas.common.enums.ServerStatus;
-import be.esmay.atlas.common.models.ServerInfo;
+import be.esmay.atlas.common.models.AtlasServer;
 
 import java.util.Arrays;
 import java.util.List;
@@ -137,8 +137,8 @@ public final class GroupsCommand implements AtlasCommand {
         Logger.info("  Total Players: " + scaler.getTotalOnlinePlayers());
         Logger.info("");
 
-        List<ServerInfo> autoServers = scaler.getAutoScaledServers();
-        List<ServerInfo> manualServers = scaler.getManuallyScaledServers();
+        List<AtlasServer> autoServers = scaler.getAutoScaledServers();
+        List<AtlasServer> manualServers = scaler.getManuallyScaledServers();
 
         Logger.info("Server Counts:");
         Logger.info("  Auto-scaled: " + autoServers.size());
@@ -170,14 +170,14 @@ public final class GroupsCommand implements AtlasCommand {
             Logger.info(String.format(serverFormat, "Name", "Status", "Players", "Manual", "Address"));
             Logger.info("  " + "-".repeat(55));
 
-            for (ServerInfo server : scaler.getServers()) {
-                String players = server.getOnlinePlayers() + "/" + server.getMaxPlayers();
+            for (AtlasServer server : scaler.getServers()) {
+                String players = (server.getServerInfo() != null ? server.getServerInfo().getOnlinePlayers() : 0) + "/" + (server.getServerInfo() != null ? server.getServerInfo().getMaxPlayers() : 0);
                 String manual = server.isManuallyScaled() ? "Yes" : "No";
                 String address = server.getAddress() + ":" + server.getPort();
 
                 Logger.info(String.format(serverFormat,
                         server.getName(),
-                        server.getStatus(),
+                        server.getServerInfo() != null ? server.getServerInfo().getStatus() : "UNKNOWN",
                         players,
                         manual,
                         address
@@ -243,8 +243,8 @@ public final class GroupsCommand implements AtlasCommand {
 
         AtlasBase.getInstance().runAsync(() -> {
             int startedCount = 0;
-            for (ServerInfo server : scaler.getServers()) {
-                if (server.getStatus() == ServerStatus.STOPPED) {
+            for (AtlasServer server : scaler.getServers()) {
+                if (server.getServerInfo() != null && server.getServerInfo().getStatus() == ServerStatus.STOPPED) {
                     try {
                         AtlasBase.getInstance().getProviderManager().getProvider()
                                 .startServer(server).get();
@@ -277,8 +277,8 @@ public final class GroupsCommand implements AtlasCommand {
 
         AtlasBase.getInstance().runAsync(() -> {
             int stoppedCount = 0;
-            for (ServerInfo server : scaler.getServers()) {
-                if (server.getStatus() == ServerStatus.RUNNING) {
+            for (AtlasServer server : scaler.getServers()) {
+                if (server.getServerInfo() != null && server.getServerInfo().getStatus() == ServerStatus.RUNNING) {
                     try {
                         AtlasBase.getInstance().getProviderManager().getProvider()
                                 .stopServer(server).get();
@@ -311,8 +311,8 @@ public final class GroupsCommand implements AtlasCommand {
 
         AtlasBase.getInstance().runAsync(() -> {
             int restartedCount = 0;
-            for (ServerInfo server : scaler.getServers()) {
-                if (server.getStatus() == ServerStatus.RUNNING) {
+            for (AtlasServer server : scaler.getServers()) {
+                if (server.getServerInfo() != null && server.getServerInfo().getStatus() == ServerStatus.RUNNING) {
                     try {
                         AtlasBase.getInstance().getProviderManager().getProvider()
                                 .stopServer(server).get();

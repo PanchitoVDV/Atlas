@@ -16,8 +16,6 @@ public final class HeartbeatPacket implements Packet {
     
     private String serverId;
     private long timestamp;
-    private int onlinePlayers;
-    private int maxPlayers;
     
     @Override
     public int getId() {
@@ -28,16 +26,12 @@ public final class HeartbeatPacket implements Packet {
     public void encode(ByteBuf buffer) {
         this.writeString(buffer, this.serverId);
         buffer.writeLong(this.timestamp);
-        buffer.writeInt(this.onlinePlayers);
-        buffer.writeInt(this.maxPlayers);
     }
     
     @Override
     public void decode(ByteBuf buffer) {
         this.serverId = this.readString(buffer);
         this.timestamp = buffer.readLong();
-        this.onlinePlayers = buffer.readInt();
-        this.maxPlayers = buffer.readInt();
     }
     
     @Override

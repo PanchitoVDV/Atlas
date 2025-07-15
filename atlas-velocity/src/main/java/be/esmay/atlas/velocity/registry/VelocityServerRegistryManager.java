@@ -1,91 +1,91 @@
 package be.esmay.atlas.velocity.registry;
 
 import be.esmay.atlas.common.enums.ServerStatus;
-import be.esmay.atlas.common.models.ServerInfo;
+import be.esmay.atlas.common.models.AtlasServer;
 import be.esmay.atlas.velocity.AtlasVelocityPlugin;
-import be.esmay.atlas.velocity.cache.NetworkServerCacheManager;
 import com.velocitypowered.api.proxy.ProxyServer;
 import com.velocitypowered.api.proxy.server.RegisteredServer;
+import com.velocitypowered.api.proxy.server.ServerInfo;
+import lombok.RequiredArgsConstructor;
 
 import java.net.InetSocketAddress;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
+@RequiredArgsConstructor
 public final class VelocityServerRegistryManager {
 
     private final ProxyServer proxyServer;
     private final Set<String> managedServers = ConcurrentHashMap.newKeySet();
 
-    public VelocityServerRegistryManager(ProxyServer proxyServer) {
-        this.proxyServer = proxyServer;
-    }
-
-    public void handleServerAdd(ServerInfo serverInfo) {
-        if (!this.isBackendServer(serverInfo) || serverInfo.getStatus() != ServerStatus.RUNNING)
+    public void handleAtlasServerAdd(AtlasServer atlasServer) {
+        if (this.isProxyServer(atlasServer) || atlasServer.getServerInfo() == null || atlasServer.getServerInfo().getStatus() != ServerStatus.RUNNING)
             return;
 
-        this.addServerToVelocity(serverInfo);
+        this.addServerToVelocity(atlasServer);
     }
 
     public void handleServerRemove(String serverId) {
         this.removeServerFromVelocity(serverId);
     }
 
-    public void handleServerInfoUpdate(ServerInfo serverInfo) {
-        if (!this.isBackendServer(serverInfo))
+    public void handleAtlasServerUpdate(AtlasServer atlasServer) {
+        if (this.isProxyServer(atlasServer))
             return;
 
-        if (serverInfo.getStatus() == ServerStatus.STOPPED || serverInfo.getStatus() == ServerStatus.ERROR) {
-            this.removeServerFromVelocity(serverInfo.getServerId());
+        if (atlasServer.getServerInfo() == null || atlasServer.getServerInfo().getStatus() == ServerStatus.STOPPED || atlasServer.getServerInfo().getStatus() == ServerStatus.ERROR) {
+            this.removeServerFromVelocity(atlasServer.getServerId());
             return;
         }
 
-        if (this.managedServers.contains(serverInfo.getServerId())) return;
-        this.addServerToVelocity(serverInfo);
+        if (this.managedServers.contains(atlasServer.getServerId())) return;
+        this.addServerToVelocity(atlasServer);
     }
 
-    private void addServerToVelocity(ServerInfo serverInfo) {
-        String serverId = serverInfo.getServerId();
+    private void addServerToVelocity(AtlasServer atlasServer) {
+        String serverId = atlasServer.getServerId();
         Optional<RegisteredServer> existingServer = this.proxyServer.getServer(serverId);
 
         if (existingServer.isEmpty()) {
-            InetSocketAddress address = new InetSocketAddress(serverInfo.getAddress(), serverInfo.getPort());
-            com.velocitypowered.api.proxy.server.ServerInfo velocityServerInfo = new com.velocitypowered.api.proxy.server.ServerInfo(serverId, address);
+            InetSocketAddress address = new InetSocketAddress(atlasServer.getAddress(), atlasServer.getPort());
+            ServerInfo velocityServerInfo = new ServerInfo(serverId, address);
 
             this.proxyServer.registerServer(velocityServerInfo);
             this.managedServers.add(serverId);
 
-            AtlasVelocityPlugin.getInstance().getLogger().info("Added server to Velocity registry: {} at {}", serverInfo.getName(), address);
+            AtlasVelocityPlugin.getInstance().getLogger().info("Registered server in Velocity: {} at {}", atlasServer.getName(), address);
             return;
         }
 
         RegisteredServer registeredServer = existingServer.get();
-        com.velocitypowered.api.proxy.server.ServerInfo velocityServerInfo = registeredServer.getServerInfo();
+        ServerInfo velocityServerInfo = registeredServer.getServerInfo();
 
         InetSocketAddress currentAddress = velocityServerInfo.getAddress();
-        InetSocketAddress newAddress = new InetSocketAddress(serverInfo.getAddress(), serverInfo.getPort());
+        InetSocketAddress newAddress = new InetSocketAddress(atlasServer.getAddress(), atlasServer.getPort());
 
-        if (!currentAddress.equals(newAddress)) {
-            this.proxyServer.unregisterServer(velocityServerInfo);
-            com.velocitypowered.api.proxy.server.ServerInfo newVelocityServerInfo = new com.velocitypowered.api.proxy.server.ServerInfo(serverId, newAddress);
-            this.proxyServer.registerServer(newVelocityServerInfo);
-        }
+        if (currentAddress.equals(newAddress))
+            return;
+
+        this.proxyServer.unregisterServer(velocityServerInfo);
+        ServerInfo newVelocityServerInfo = new ServerInfo(serverId, newAddress);
+        this.proxyServer.registerServer(newVelocityServerInfo);
     }
 
     private void removeServerFromVelocity(String serverId) {
         Optional<RegisteredServer> server = this.proxyServer.getServer(serverId);
 
-        if (server.isPresent() && this.managedServers.contains(serverId)) {
-            this.proxyServer.unregisterServer(server.get().getServerInfo());
-            this.managedServers.remove(serverId);
+        if (server.isEmpty() || !this.managedServers.contains(serverId))
+            return;
 
-            AtlasVelocityPlugin.getInstance().getLogger().info("Removed server from Velocity registry: {}", serverId);
-        }
+        this.proxyServer.unregisterServer(server.get().getServerInfo());
+        this.managedServers.remove(serverId);
+
+        AtlasVelocityPlugin.getInstance().getLogger().info("Unregistered server in Velocity: {}", serverId);
     }
 
-    private boolean isBackendServer(ServerInfo serverInfo) {
-        return serverInfo != null && !serverInfo.getGroup().equalsIgnoreCase("proxy");
+    private boolean isProxyServer(AtlasServer atlasServer) {
+        return atlasServer == null || atlasServer.getGroup().equalsIgnoreCase("proxy");
     }
 
 }

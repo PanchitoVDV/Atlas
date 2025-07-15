@@ -5,6 +5,7 @@ import be.esmay.atlas.base.api.dto.WebSocketMessage;
 import be.esmay.atlas.base.provider.ServiceProvider;
 import be.esmay.atlas.base.scaler.Scaler;
 import be.esmay.atlas.base.utils.Logger;
+import be.esmay.atlas.common.models.AtlasServer;
 import be.esmay.atlas.common.models.ServerInfo;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -274,7 +275,7 @@ public final class WebSocketManager {
             });
     }
 
-    private void executeServerAction(WebSocketConnection connection, String commandId, String serverId, String action, Function<ServerInfo, CompletableFuture<Void>> serverAction) {
+    private void executeServerAction(WebSocketConnection connection, String commandId, String serverId, String action, Function<AtlasServer, CompletableFuture<Void>> serverAction) {
         if (serverId == null) {
             this.sendMessage(connection, WebSocketMessage.commandResult(commandId, false, "serverId is required"));
             return;
@@ -289,7 +290,7 @@ public final class WebSocketManager {
                     return;
                 }
 
-                ServerInfo server = serverOpt.get();
+                AtlasServer server = serverOpt.get();
                 serverAction.apply(server)
                     .thenRun(() -> this.sendMessage(connection, WebSocketMessage.commandResult(commandId, true, "Server " + action + " initiated")))
                     .exceptionally(throwable -> {
@@ -332,20 +333,20 @@ public final class WebSocketManager {
         provider.getServer(connection.getServerId())
             .thenAccept(serverOpt -> {
                 if (serverOpt.isPresent()) {
-                    ServerInfo server = serverOpt.get();
+                    AtlasServer server = serverOpt.get();
                     JsonObject serverData = new JsonObject();
                     serverData.put("serverId", server.getServerId());
                     serverData.put("name", server.getName());
                     serverData.put("group", server.getGroup());
-                    serverData.put("status", server.getStatus().toString());
+                    serverData.put("status", server.getServerInfo() != null ? server.getServerInfo().getStatus().toString() : "UNKNOWN");
                     serverData.put("type", server.getType().toString());
                     serverData.put("address", server.getAddress());
                     serverData.put("port", server.getPort());
-                    serverData.put("onlinePlayers", server.getOnlinePlayers());
-                    serverData.put("maxPlayers", server.getMaxPlayers());
+                    serverData.put("onlinePlayers", server.getServerInfo() != null ? server.getServerInfo().getOnlinePlayers() : 0);
+                    serverData.put("maxPlayers", server.getServerInfo() != null ? server.getServerInfo().getMaxPlayers() : 0);
                     serverData.put("manuallyScaled", server.isManuallyScaled());
                     serverData.put("createdAt", server.getCreatedAt());
-                    serverData.put("lastHeartbeat", server.getLastHeartbeat());
+                    serverData.put("lastHeartbeat", server.getServerInfo() != null ? server.getLastHeartbeat() : 0);
                     
                     try {
                         JsonNode serverNode = this.objectMapper.valueToTree(serverData.getMap());
@@ -488,7 +489,7 @@ public final class WebSocketManager {
             provider.getServer(serverId)
                 .thenAccept(serverOpt -> {
                     if (serverOpt.isPresent()) {
-                        ServerInfo server = serverOpt.get();
+                        AtlasServer server = serverOpt.get();
                         
                         provider.getServerStats(serverId)
                             .thenAccept(serverStats -> {
@@ -511,9 +512,9 @@ public final class WebSocketManager {
                                 stats.put("ram", ramObject);
                                 stats.put("disk", diskObject);
                                 stats.put("network", networkObject);
-                                stats.put("players", server.getOnlinePlayers());
-                                stats.put("maxPlayers", server.getMaxPlayers());
-                                stats.put("status", server.getStatus().toString());
+                                stats.put("players", server.getServerInfo() != null ? server.getServerInfo().getOnlinePlayers() : 0);
+                                stats.put("maxPlayers", server.getServerInfo() != null ? server.getServerInfo().getMaxPlayers() : 0);
+                                stats.put("status", server.getServerInfo() != null ? server.getServerInfo().getStatus().toString() : "UNKNOWN");
                                 stats.put("timestamp", serverStats.getTimestamp());
 
                                 try {

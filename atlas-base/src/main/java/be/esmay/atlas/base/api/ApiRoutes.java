@@ -5,7 +5,7 @@ import be.esmay.atlas.base.api.dto.ApiResponse;
 import be.esmay.atlas.base.provider.ServiceProvider;
 import be.esmay.atlas.base.scaler.Scaler;
 import be.esmay.atlas.base.utils.Logger;
-import be.esmay.atlas.common.models.ServerInfo;
+import be.esmay.atlas.common.models.AtlasServer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.vertx.core.json.JsonObject;
@@ -130,10 +130,10 @@ public final class ApiRoutes {
             .thenAccept(servers -> {
                 JsonObject metrics = new JsonObject()
                     .put("totalServers", servers.size())
-                    .put("totalPlayers", servers.stream().mapToInt(ServerInfo::getOnlinePlayers).sum())
+                    .put("totalPlayers", servers.stream().mapToInt(server -> server.getServerInfo() != null ? server.getServerInfo().getOnlinePlayers() : 0).sum())
                     .put("serversByStatus", servers.stream()
                         .collect(Collectors.groupingBy(
-                            server -> server.getStatus().toString(),
+                            server -> server.getServerInfo() != null ? server.getServerInfo().getStatus().toString() : "UNKNOWN",
                             Collectors.counting())));
 
                 this.sendResponse(context, ApiResponse.success(metrics));
@@ -230,7 +230,7 @@ public final class ApiRoutes {
     }
 
     private void executeServerAction(RoutingContext context, String serverId, String action, 
-                                   java.util.function.Function<ServerInfo, java.util.concurrent.CompletableFuture<Void>> serverAction) {
+                                   java.util.function.Function<AtlasServer, java.util.concurrent.CompletableFuture<Void>> serverAction) {
         ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
 
         provider.getServer(serverId)
@@ -240,7 +240,7 @@ public final class ApiRoutes {
                     return;
                 }
 
-                ServerInfo server = serverOpt.get();
+                AtlasServer server = serverOpt.get();
                 serverAction.apply(server)
                     .thenRun(() -> this.sendResponse(context, ApiResponse.success(null, "Server " + action + " initiated")))
                     .exceptionally(throwable -> {

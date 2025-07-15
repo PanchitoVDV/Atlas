@@ -50,7 +50,7 @@ public final class AtlasBase {
         this.providerManager = new ProviderManager();
         this.scalerManager = new ScalerManager(this);
         this.commandManager = new CommandManager();
-        this.serverManager = new ServerManager(new ServerLifecycleManager(this), this);
+        this.serverManager = new ServerManager(this);
         this.apiManager = new ApiManager(this);
 
         Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown, "Atlas-Shutdown"));
@@ -182,7 +182,6 @@ public final class AtlasBase {
             }
 
             atlasBase.start();
-
             atlasBase.shutdownLatch.await();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

@@ -1,18 +1,15 @@
 package be.esmay.atlas.velocity.events;
 
-import be.esmay.atlas.common.models.ServerInfo;
+import be.esmay.atlas.common.models.AtlasServer;
 import lombok.Getter;
+import lombok.RequiredArgsConstructor;
 
 @Getter
+@RequiredArgsConstructor
 public final class AtlasServerUpdateEvent {
     
-    private final ServerInfo currentServerInfo;
-    private final ServerInfo previousServerInfo;
-    
-    public AtlasServerUpdateEvent(ServerInfo currentServerInfo, ServerInfo previousServerInfo) {
-        this.currentServerInfo = currentServerInfo;
-        this.previousServerInfo = previousServerInfo;
-    }
+    private final AtlasServer currentServerInfo;
+    private final AtlasServer previousServerInfo;
 
     public boolean isServerAdded() {
         return this.currentServerInfo != null && this.previousServerInfo == null;
@@ -30,9 +27,11 @@ public final class AtlasServerUpdateEvent {
         if (this.currentServerInfo != null) {
             return this.currentServerInfo.getServerId();
         }
+
         if (this.previousServerInfo != null) {
             return this.previousServerInfo.getServerId();
         }
+
         return null;
     }
     

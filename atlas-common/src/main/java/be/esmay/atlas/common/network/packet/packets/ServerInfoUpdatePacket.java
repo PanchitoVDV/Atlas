@@ -18,6 +18,7 @@ public final class ServerInfoUpdatePacket implements Packet {
     
     private static final Gson GSON = new Gson();
     
+    private String serverId;
     private ServerInfo serverInfo;
     
     @Override
@@ -27,6 +28,8 @@ public final class ServerInfoUpdatePacket implements Packet {
     
     @Override
     public void encode(ByteBuf buffer) {
+        this.writeString(buffer, this.serverId);
+        
         if (this.serverInfo == null) {
             this.writeString(buffer, null);
             return;
@@ -39,6 +42,8 @@ public final class ServerInfoUpdatePacket implements Packet {
     @Override
     public void decode(ByteBuf buffer) {
         try {
+            this.serverId = this.readString(buffer);
+            
             String json = this.readString(buffer);
             if (json == null) {
                 this.serverInfo = null;
@@ -47,7 +52,7 @@ public final class ServerInfoUpdatePacket implements Packet {
             
             this.serverInfo = GSON.fromJson(json, ServerInfo.class);
         } catch (Exception e) {
-            throw new RuntimeException("Failed to decode ServerInfo from JSON", e);
+            throw new RuntimeException("Failed to decode ServerInfoUpdatePacket from JSON", e);
         }
     }
     

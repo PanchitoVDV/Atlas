@@ -1,5 +1,6 @@
 package be.esmay.atlas.common.network.packet;
 
+import be.esmay.atlas.common.network.packet.packets.AtlasServerUpdatePacket;
 import be.esmay.atlas.common.network.packet.packets.AuthenticationPacket;
 import be.esmay.atlas.common.network.packet.packets.HandshakePacket;
 import be.esmay.atlas.common.network.packet.packets.HeartbeatPacket;
@@ -27,6 +28,8 @@ public interface PacketHandler {
     void handleServerRemove(ServerRemovePacket packet);
     
     void handleServerInfoUpdate(ServerInfoUpdatePacket packet);
+    
+    void handleAtlasServerUpdate(AtlasServerUpdatePacket packet);
     
     void handleServerListRequest(ServerListRequestPacket packet);
     

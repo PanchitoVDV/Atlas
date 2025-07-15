@@ -76,7 +76,7 @@ public final class LogStreamManager {
         
         provider.getAllServers()
             .thenAccept(servers -> {
-                for (be.esmay.atlas.common.models.ServerInfo server : servers) {
+                for (be.esmay.atlas.common.models.AtlasServer server : servers) {
                     this.startServerLogStream(server.getServerId());
                 }
             })

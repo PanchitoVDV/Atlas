@@ -1,5 +1,6 @@
 package be.esmay.atlas.base.provider;
 
+import be.esmay.atlas.common.models.AtlasServer;
 import be.esmay.atlas.common.models.ServerInfo;
 import be.esmay.atlas.common.models.ServerStats;
 import be.esmay.atlas.base.config.impl.ScalerConfig;
@@ -23,10 +24,10 @@ public abstract class ServiceProvider {
      * Creates a new server instance based on the provided group configuration and server info.
      * 
      * @param groupConfig the configuration for the server group
-     * @param serverInfo the server information including working directory
-     * @return a CompletableFuture containing the created ServerInfo
+     * @param atlasServer the server information including working directory
+     * @return a CompletableFuture containing the created AtlasServer
      */
-    public abstract CompletableFuture<ServerInfo> createServer(ScalerConfig.Group groupConfig, ServerInfo serverInfo);
+    public abstract CompletableFuture<AtlasServer> createServer(ScalerConfig.Group groupConfig, AtlasServer atlasServer);
     
     /**
      * Starts an existing server that is currently stopped.
@@ -34,7 +35,7 @@ public abstract class ServiceProvider {
      * @param server the server to start
      * @return a CompletableFuture containing void when complete
      */
-    public abstract CompletableFuture<Void> startServer(ServerInfo server);
+    public abstract CompletableFuture<Void> startServer(AtlasServer server);
     
     /**
      * Stops a running server gracefully.
@@ -42,7 +43,7 @@ public abstract class ServiceProvider {
      * @param server the server to stop
      * @return a CompletableFuture containing void when complete
      */
-    public abstract CompletableFuture<Void> stopServer(ServerInfo server);
+    public abstract CompletableFuture<Void> stopServer(AtlasServer server);
     
     /**
      * Permanently deletes a server and releases all associated resources.
@@ -56,24 +57,24 @@ public abstract class ServiceProvider {
      * Retrieves information about a specific server.
      * 
      * @param serverId the unique identifier of the server
-     * @return a CompletableFuture containing an Optional with the ServerInfo if found
+     * @return a CompletableFuture containing an Optional with the AtlasServer if found
      */
-    public abstract CompletableFuture<Optional<ServerInfo>> getServer(String serverId);
+    public abstract CompletableFuture<Optional<AtlasServer>> getServer(String serverId);
     
     /**
      * Retrieves information about all servers managed by this creator.
      * 
-     * @return a CompletableFuture containing a list of all ServerInfo objects
+     * @return a CompletableFuture containing a list of all AtlasServer objects
      */
-    public abstract CompletableFuture<List<ServerInfo>> getAllServers();
+    public abstract CompletableFuture<List<AtlasServer>> getAllServers();
     
     /**
      * Retrieves all servers belonging to a specific group.
      * 
      * @param group the name of the server group
-     * @return a CompletableFuture containing a list of ServerInfo objects in the group
+     * @return a CompletableFuture containing a list of AtlasServer objects in the group
      */
-    public abstract CompletableFuture<List<ServerInfo>> getServersByGroup(String group);
+    public abstract CompletableFuture<List<AtlasServer>> getServersByGroup(String group);
     
     /**
      * Checks if a server is currently running.
@@ -87,10 +88,10 @@ public abstract class ServiceProvider {
      * Updates the status and information of an existing server.
      * 
      * @param serverId the unique identifier of the server to update
-     * @param updatedInfo the new ServerInfo to store
+     * @param updatedServer the new AtlasServer to store
      * @return a CompletableFuture containing true if successful, false otherwise
      */
-    public abstract CompletableFuture<Boolean> updateServerStatus(String serverId, ServerInfo updatedInfo);
+    public abstract CompletableFuture<Boolean> updateServerStatus(String serverId, AtlasServer updatedServer);
     
     /**
      * Retrieves real-time resource statistics for a specific server.

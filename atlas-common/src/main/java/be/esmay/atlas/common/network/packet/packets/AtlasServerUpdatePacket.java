@@ -1,8 +1,8 @@
 package be.esmay.atlas.common.network.packet.packets;
 
+import be.esmay.atlas.common.models.AtlasServer;
 import be.esmay.atlas.common.network.packet.Packet;
 import be.esmay.atlas.common.network.packet.PacketHandler;
-import be.esmay.atlas.common.models.AtlasServer;
 import com.google.gson.Gson;
 import io.netty.buffer.ByteBuf;
 import lombok.AllArgsConstructor;
@@ -14,31 +14,46 @@ import java.nio.charset.StandardCharsets;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public final class ServerAddPacket implements Packet {
+public final class AtlasServerUpdatePacket implements Packet {
     
     private static final Gson GSON = new Gson();
+    
     private AtlasServer atlasServer;
     
     @Override
     public int getId() {
-        return 0x12;
+        return 0x21;
     }
     
     @Override
     public void encode(ByteBuf buffer) {
+        if (this.atlasServer == null) {
+            this.writeString(buffer, null);
+            return;
+        }
+        
         String json = GSON.toJson(this.atlasServer);
         this.writeString(buffer, json);
     }
     
     @Override
     public void decode(ByteBuf buffer) {
-        String json = this.readString(buffer);
-        this.atlasServer = GSON.fromJson(json, AtlasServer.class);
+        try {
+            String json = this.readString(buffer);
+            if (json == null) {
+                this.atlasServer = null;
+                return;
+            }
+            
+            this.atlasServer = GSON.fromJson(json, AtlasServer.class);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to decode AtlasServer from JSON", e);
+        }
     }
     
     @Override
     public void handle(PacketHandler handler) {
-        handler.handleServerAdd(this);
+        handler.handleAtlasServerUpdate(this);
     }
     
     private void writeString(ByteBuf buffer, String str) {

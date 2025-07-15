@@ -9,7 +9,7 @@ import be.esmay.atlas.common.network.packet.packets.ServerUpdatePacket;
 import be.esmay.atlas.base.network.security.AuthenticationHandler;
 import be.esmay.atlas.base.network.security.ConnectionValidator;
 import be.esmay.atlas.base.utils.Logger;
-import be.esmay.atlas.common.models.ServerInfo;
+import be.esmay.atlas.common.models.AtlasServer;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelOption;
@@ -111,21 +111,21 @@ public final class NettyServer {
         Logger.info("Netty server stopped");
     }
     
-    public void broadcastServerUpdate(ServerInfo serverInfo) {
+    public void broadcastServerUpdate(AtlasServer atlasServer) {
         if (!this.running) {
             return;
         }
         
-        ServerUpdatePacket packet = new ServerUpdatePacket(serverInfo);
+        ServerUpdatePacket packet = new ServerUpdatePacket(atlasServer);
         this.connectionManager.broadcastPacket(packet);
     }
     
-    public void broadcastServerAdd(ServerInfo serverInfo) {
+    public void broadcastServerAdd(AtlasServer atlasServer) {
         if (!this.running) {
             return;
         }
         
-        ServerAddPacket packet = new ServerAddPacket(serverInfo);
+        ServerAddPacket packet = new ServerAddPacket(atlasServer);
         this.connectionManager.broadcastPacket(packet);
     }
     
