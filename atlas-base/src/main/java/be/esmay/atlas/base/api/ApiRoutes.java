@@ -7,6 +7,7 @@ import be.esmay.atlas.base.scaler.Scaler;
 import be.esmay.atlas.base.utils.Logger;
 import be.esmay.atlas.common.models.AtlasServer;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.Router;
@@ -32,6 +33,7 @@ public final class ApiRoutes {
         this.authHandler = authHandler;
         this.objectMapper = new ObjectMapper();
         this.objectMapper.registerModule(new JavaTimeModule());
+        this.objectMapper.enable(SerializationFeature.INDENT_OUTPUT);
     }
 
     public void setupRoutes() {

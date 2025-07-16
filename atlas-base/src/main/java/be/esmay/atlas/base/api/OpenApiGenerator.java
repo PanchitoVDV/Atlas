@@ -337,16 +337,29 @@ public final class OpenApiGenerator {
                 .operationId("connectWebSocket")
                 .summary("Server WebSocket connection")
                 .description("Establishes a WebSocket connection for real-time communication with a specific server. " +
-                    "Supports live log streaming, server stats, and command execution. " +
+                    "Supports live log streaming, server control, and real-time statistics. " +
                     "\n\n**Outbound Message Types (Client to Server):**\n" +
-                    "- `log` - Request live log streaming: `{\"type\": \"log\", \"action\": \"start|stop\"}`\n" +
-                    "- `command` - Execute server command: `{\"type\": \"command\", \"data\": \"say Hello World!\"}`\n" +
-                    "- `ping` - Connection keepalive: `{\"type\": \"ping\"}`\n" +
+                    "- `auth` - Authenticate with token: `{\"type\": \"auth\", \"token\": \"your-api-key\"}`\n" +
+                    "- `subscribe` - Subscribe to streams: `{\"type\": \"subscribe\", \"streams\": [\"logs\", \"stats\", \"events\"], \"targets\": [\"serverId\", \"global\"]}`\n" +
+                    "- `server-start` - Start server: `{\"type\": \"server-start\"}`\n" +
+                    "- `server-stop` - Stop server: `{\"type\": \"server-stop\"}`\n" +
+                    "- `server-restart` - Restart server: `{\"type\": \"server-restart\"}`\n" +
+                    "- `server-command` - Execute command: `{\"type\": \"server-command\", \"command\": \"say Hello!\", \"id\": \"cmd123\"}`\n" +
+                    "- `server-create` - Create new server: `{\"type\": \"server-create\", \"group\": \"Lobby\"}`\n" +
+                    "- `server-remove` - Remove server: `{\"type\": \"server-remove\"}`\n" +
+                    "- `scale` - Scale group: `{\"type\": \"scale\", \"group\": \"Lobby\", \"direction\": \"up\"}`\n" +
+                    "- `get-logs-history` - Get log history: `{\"type\": \"get-logs-history\", \"serverId\": \"abc123\", \"lines\": 20}`\n" +
                     "\n**Inbound Message Types (Server to Client):**\n" +
-                    "- `log` - Live log line: `{\"type\": \"log\", \"data\": \"[INFO] Player joined\", \"timestamp\": 1752700258719}`\n" +
-                    "- `stats` - Server statistics: `{\"type\": \"stats\", \"data\": {\"players\": 5, \"maxPlayers\": 75, \"status\": \"RUNNING\"}}`\n" +
-                    "- `pong` - Ping response: `{\"type\": \"pong\"}`\n" +
-                    "- `error` - Error message: `{\"type\": \"error\", \"message\": \"Command failed\"}`")
+                    "- `log` - Live log line: `{\"type\": \"log\", \"message\": \"[INFO] Player joined\", \"serverId\": \"abc123\", \"timestamp\": 1752700258719}`\n" +
+                    "- `stats` - Server statistics: `{\"type\": \"stats\", \"data\": {\"cpu\": 15.2, \"ram\": {\"used\": 512, \"total\": 1024, \"percentage\": 50}, \"disk\": {...}, \"network\": {...}, \"players\": 5, \"maxPlayers\": 75, \"status\": \"RUNNING\"}, \"timestamp\": 1752700258719}`\n" +
+                    "- `server-info` - Server details on connect: `{\"type\": \"server-info\", \"data\": {\"serverId\": \"abc123\", \"name\": \"lobby-1\", \"group\": \"Lobby\", \"status\": \"RUNNING\", ...}, \"timestamp\": 1752700258719}`\n" +
+                    "- `command-result` - Command execution result: `{\"type\": \"command-result\", \"commandId\": \"cmd123\", \"message\": \"Command executed successfully\", \"timestamp\": 1752700258719}`\n" +
+                    "- `event` - Server events: `{\"type\": \"event\", \"message\": \"restart-started\", \"serverId\": \"abc123\", \"timestamp\": 1752700258719}`\n" +
+                    "- `logs-history` - Historical logs: `{\"type\": \"logs-history\", \"data\": {\"logs\": [\"log1\", \"log2\"]}, \"serverId\": \"abc123\", \"timestamp\": 1752700258719}`\n" +
+                    "- `subscribe-result` - Subscription confirmation: `{\"type\": \"subscribe-result\", \"message\": \"Subscriptions updated\", \"timestamp\": 1752700258719}`\n" +
+                    "- `auth-result` - Authentication result: `{\"type\": \"auth-result\", \"message\": \"Authentication successful\", \"timestamp\": 1752700258719}`\n" +
+                    "- `auth-challenge` - Periodic re-auth: `{\"type\": \"auth-challenge\", \"timestamp\": 1752700258719}`\n" +
+                    "- `error` - Error message: `{\"type\": \"error\", \"message\": \"Command failed\", \"timestamp\": 1752700258719}`")
                 .addTagsItem("WebSocket")
                 .addParametersItem(serverIdParam)
                 .addParametersItem(new Parameter()
@@ -418,7 +431,7 @@ public final class OpenApiGenerator {
                 .addProperty("status", new StringSchema().example("RUNNING").description("Current server status"))
                 .addProperty("onlinePlayers", new Schema<>().type("integer").example(5).description("Current number of online players"))
                 .addProperty("maxPlayers", new Schema<>().type("integer").example(75).description("Maximum number of players allowed"))
-                .addProperty("onlinePlayerNames", new ArraySchema().items(new StringSchema()).example("[\"Player1\", \"Player2\", \"Player3\", \"Player4\", \"Player5\"]").description("List of online player names"))),
+                .addProperty("onlinePlayerNames", new ArraySchema().items(new StringSchema()).description("List of online player names"))),
 
             Map.entry("AtlasServer", new ObjectSchema()
                 .addProperty("serverId", new StringSchema().example("550e8400-e29b-41d4-a716-446655440000").description("Unique server identifier"))
@@ -437,8 +450,7 @@ public final class OpenApiGenerator {
             
             Map.entry("ServerListResponse", new ObjectSchema()
                 .addProperty("status", new StringSchema().example("success"))
-                .addProperty("data", new ArraySchema().items(new Schema<>().$ref("#/components/schemas/AtlasServer"))
-                    .example("[{\"serverId\":\"550e8400-e29b-41d4-a716-446655440000\",\"name\":\"lobby-1\",\"group\":\"Lobby\",\"workingDirectory\":\"servers/Lobby/lobby-1#550e8400-e29b-41d4-a716-446655440000\",\"address\":\"172.18.0.10\",\"port\":25565,\"type\":\"DYNAMIC\",\"createdAt\":1752700195234,\"lastHeartbeat\":1752700258719,\"serviceProviderId\":\"4d97019952fe1ef1fb2e77a4c20040c0795c7794a5ae9121de0d6cf831a0736b\",\"shutdown\":false,\"manuallyScaled\":true,\"serverInfo\":{\"status\":\"RUNNING\",\"onlinePlayers\":5,\"maxPlayers\":75,\"onlinePlayerNames\":[\"Player1\",\"Player2\",\"Player3\",\"Player4\",\"Player5\"]}}]"))
+                .addProperty("data", new ArraySchema().items(new Schema<>().$ref("#/components/schemas/AtlasServer")))
                 .addProperty("timestamp", new Schema<>().type("integer").format("int64").example(1752700258719L))),
             
             Map.entry("ServerResponse", new ObjectSchema()
@@ -462,15 +474,14 @@ public final class OpenApiGenerator {
             
             Map.entry("GroupListResponse", new ObjectSchema()
                 .addProperty("status", new StringSchema().example("success"))
-                .addProperty("data", new ArraySchema().items(new StringSchema()).example("[\"Lobby\", \"Survival\", \"Creative\"]"))
+                .addProperty("data", new ArraySchema().items(new StringSchema()))
                 .addProperty("timestamp", new Schema<>().type("integer").format("int64").example(1752700258719L))),
             
             Map.entry("ScalingResponse", new ObjectSchema()
                 .addProperty("status", new StringSchema().example("success"))
                 .addProperty("data", new ObjectSchema().additionalProperties(new ObjectSchema()
                     .addProperty("group", new StringSchema().example("Lobby"))
-                    .addProperty("type", new StringSchema().example("NormalScaler")))
-                    .example("{\"Lobby\":{\"group\":\"Lobby\",\"type\":\"NormalScaler\"},\"Survival\":{\"group\":\"Survival\",\"type\":\"ProxyScaler\"}}"))
+                    .addProperty("type", new StringSchema().example("NormalScaler"))))
                 .addProperty("timestamp", new Schema<>().type("integer").format("int64").example(1752700258719L))),
             
             Map.entry("MetricsResponse", new ObjectSchema()
@@ -478,8 +489,7 @@ public final class OpenApiGenerator {
                 .addProperty("data", new ObjectSchema()
                     .addProperty("totalServers", new Schema<>().type("integer").example(3))
                     .addProperty("totalPlayers", new Schema<>().type("integer").example(47))
-                    .addProperty("serversByStatus", new ObjectSchema().additionalProperties(new Schema<>().type("integer"))
-                        .example("{\"RUNNING\":2,\"STARTING\":1}")))
+                    .addProperty("serversByStatus", new ObjectSchema().additionalProperties(new Schema<>().type("integer"))))
                 .addProperty("timestamp", new Schema<>().type("integer").format("int64").example(1752700258719L)))
         );
     }
