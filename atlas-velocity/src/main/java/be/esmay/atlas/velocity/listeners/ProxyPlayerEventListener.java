@@ -1,5 +1,6 @@
 package be.esmay.atlas.velocity.listeners;
 
+import be.esmay.atlas.velocity.AtlasVelocityPlugin;
 import be.esmay.atlas.velocity.network.AtlasNetworkClient;
 import be.esmay.atlas.velocity.proxy.ProxyServerInfoManager;
 import com.velocitypowered.api.event.PostOrder;
@@ -10,6 +11,8 @@ import com.velocitypowered.api.event.player.ServerConnectedEvent;
 import com.velocitypowered.api.proxy.Player;
 import lombok.RequiredArgsConstructor;
 
+import java.util.concurrent.TimeUnit;
+
 @RequiredArgsConstructor
 public final class ProxyPlayerEventListener {
 
@@ -17,12 +20,12 @@ public final class ProxyPlayerEventListener {
 
     @Subscribe(order = PostOrder.LATE)
     public void onPostLogin(PostLoginEvent event) {
-        this.networkClient.sendServerInfoUpdate();
+        AtlasVelocityPlugin.getInstance().getProxyServer().getScheduler().buildTask(AtlasVelocityPlugin.getInstance(), this.networkClient::sendServerInfoUpdate).delay(100, TimeUnit.MILLISECONDS).schedule();
     }
     
     @Subscribe(order = PostOrder.LATE)
     public void onDisconnect(DisconnectEvent event) {
-        this.networkClient.sendServerInfoUpdate();
+        AtlasVelocityPlugin.getInstance().getProxyServer().getScheduler().buildTask(AtlasVelocityPlugin.getInstance(), this.networkClient::sendServerInfoUpdate).delay(100, TimeUnit.MILLISECONDS).schedule();
     }
     
 }

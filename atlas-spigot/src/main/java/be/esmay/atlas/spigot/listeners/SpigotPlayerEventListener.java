@@ -1,7 +1,9 @@
 package be.esmay.atlas.spigot.listeners;
 
+import be.esmay.atlas.spigot.AtlasSpigotPlugin;
 import be.esmay.atlas.spigot.network.AtlasNetworkClient;
 import lombok.RequiredArgsConstructor;
+import org.bukkit.Bukkit;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -16,11 +18,11 @@ public final class SpigotPlayerEventListener implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onPlayerJoin(PlayerJoinEvent event) {
-        this.networkClient.sendServerInfoUpdate();
+        Bukkit.getScheduler().runTaskLater(AtlasSpigotPlugin.getInstance(), this.networkClient::sendServerInfoUpdate, 1L);
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onPlayerQuit(PlayerQuitEvent event) {
-        this.networkClient.sendServerInfoUpdate();
+        Bukkit.getScheduler().runTaskLater(AtlasSpigotPlugin.getInstance(), this.networkClient::sendServerInfoUpdate, 1L);
     }
 }

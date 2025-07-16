@@ -1,0 +1,7 @@
+{
+  "entrypoint": "be.esmay.atlas.minestom.AtlasMinestomPlugin",
+  "name": "AtlasMinestom",
+  "version": "1.0.0",
+  "author": "Esmaybe",
+  "description": "Atlas network client for Minestom servers"
+}
