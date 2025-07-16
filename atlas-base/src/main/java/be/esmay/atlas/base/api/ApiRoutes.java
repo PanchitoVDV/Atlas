@@ -13,10 +13,12 @@ import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.handler.BodyHandler;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 public final class ApiRoutes {
@@ -160,16 +162,32 @@ public final class ApiRoutes {
             return;
         }
 
+        if (count <= 0) {
+            this.sendError(context, "Count must be greater than 0", 400);
+            return;
+        }
+
         Scaler scaler = AtlasBase.getInstance().getScalerManager().getScaler(group);
         if (scaler == null) {
             this.sendError(context, "Group not found: " + group, 404);
             return;
         }
 
-        scaler.upscale()
-            .thenRun(() -> this.sendResponse(context, ApiResponse.success(null, "Server creation initiated")))
+        List<CompletableFuture<Void>> createFutures = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            createFutures.add(scaler.upscale());
+        }
+
+        CompletableFuture<Void> allFutures = CompletableFuture.allOf(
+            createFutures.toArray(new CompletableFuture[0]));
+
+        allFutures
+            .thenRun(() -> {
+                String message = count == 1 ? "Server creation initiated" : count + " server creations initiated";
+                this.sendResponse(context, ApiResponse.success(null, message));
+            })
             .exceptionally(throwable -> {
-                this.sendError(context, "Failed to create server: " + throwable.getMessage());
+                this.sendError(context, "Failed to create servers: " + throwable.getMessage());
                 return null;
             });
     }
@@ -254,7 +272,7 @@ public final class ApiRoutes {
     }
 
     private void executeServerAction(RoutingContext context, String serverId, String action, 
-                                   java.util.function.Function<AtlasServer, java.util.concurrent.CompletableFuture<Void>> serverAction) {
+                                   java.util.function.Function<AtlasServer, CompletableFuture<Void>> serverAction) {
         ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
 
         provider.getServer(serverId)
