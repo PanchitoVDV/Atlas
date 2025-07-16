@@ -16,6 +16,11 @@ dependencies {
 
 tasks.named<ShadowJar>("shadowJar") {
     dependsOn(":atlas-common:shadowJar")
+    
+    // Exclude dependencies provided by Minestom (Gson, SLF4J)
+    exclude("com/google/gson/**")
+    exclude("org/slf4j/**")
+    exclude("ch/qos/logback/**")
 }
 
 tasks.named("compileJava") {

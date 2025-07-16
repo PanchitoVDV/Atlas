@@ -10,7 +10,7 @@ dependencies {
     compileOnly("com.velocitypowered:velocity-api:3.3.0-SNAPSHOT")
     annotationProcessor("com.velocitypowered:velocity-api:3.3.0-SNAPSHOT")
 
-    implementation("io.netty:netty-all:4.1.100.Final")
+    compileOnly("io.netty:netty-all:4.1.100.Final")
 }
 
 tasks.named("compileJava") {
@@ -19,4 +19,10 @@ tasks.named("compileJava") {
 
 tasks.named<ShadowJar>("shadowJar") {
     dependsOn(":atlas-common:shadowJar")
+    
+    // Exclude dependencies provided by Velocity
+    exclude("io/netty/**")
+    exclude("com/google/gson/**")
+    exclude("org/slf4j/**")
+    exclude("ch/qos/logback/**")
 }

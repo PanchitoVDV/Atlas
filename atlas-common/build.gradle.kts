@@ -1,9 +1,8 @@
 dependencies {
-    // Network dependencies
-    implementation("io.netty:netty-all:4.1.100.Final")
+    // Network dependencies - compileOnly since provided by server platforms
+    compileOnly("io.netty:netty-all:4.1.100.Final")
     
-    // JSON processing
-    implementation("com.fasterxml.jackson.core:jackson-databind:2.16.1")
+    // JSON processing - only keep Gson, Jackson moved to atlas-base
     implementation("com.google.code.gson:gson:2.10.1")
     
     // Logging (need for packet encoder/decoder)

@@ -8,11 +8,17 @@ repositories {
 dependencies {
     implementation(project(":atlas-common"))
     compileOnly("org.spigotmc:spigot-api:1.21.5-R0.1-SNAPSHOT")
-    implementation("io.netty:netty-all:4.1.100.Final")
+    compileOnly("io.netty:netty-all:4.1.100.Final")
 }
 
 tasks.named<ShadowJar>("shadowJar") {
     dependsOn(":atlas-common:shadowJar")
+    
+    // Exclude dependencies provided by Spigot
+    exclude("io/netty/**")
+    exclude("com/google/gson/**")
+    exclude("org/slf4j/**")
+    exclude("ch/qos/logback/**")
 }
 
 tasks.named("compileJava") {
