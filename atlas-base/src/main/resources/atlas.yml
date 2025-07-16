@@ -19,6 +19,18 @@ atlas:
   templates:
     download-on-startup: true
     cleanup-dynamic-on-shutdown: true
+    s3:
+      enabled: false
+      bucket: "atlas-templates"
+      region: "us-east-1"
+      endpoint: "https://s3.amazonaws.com"
+      access-key-id: "your-access-key"
+      secret-access-key: "your-secret-key"
+      path-prefix: "templates/"
+      cache:
+        enabled: true
+        directory: "cache/templates"
+        ttl-seconds: 3600
 
   scaling:
     check-interval: 5

@@ -96,6 +96,46 @@ public final class AtlasConfig extends ConfigurateConfig {
         @Setting("cleanup-dynamic-on-shutdown")
         private boolean cleanupDynamicOnShutdown;
 
+        private S3 s3;
+
+    }
+
+    @Data
+    @ConfigSerializable
+    public static class S3 {
+
+        private boolean enabled = false;
+
+        private String bucket;
+
+        private String region = "us-east-1";
+
+        private String endpoint = "https://s3.amazonaws.com";
+
+        @Setting("access-key-id")
+        private String accessKeyId;
+
+        @Setting("secret-access-key")
+        private String secretAccessKey;
+
+        @Setting("path-prefix")
+        private String pathPrefix = "templates/";
+
+        private S3Cache cache;
+
+    }
+
+    @Data
+    @ConfigSerializable
+    public static class S3Cache {
+
+        private boolean enabled = true;
+
+        private String directory = "cache/templates";
+
+        @Setting("ttl-seconds")
+        private int ttlSeconds = 3600;
+
     }
 
     @Getter

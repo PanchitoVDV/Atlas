@@ -7,6 +7,7 @@ import be.esmay.atlas.base.commands.impl.MetricsCommand;
 import be.esmay.atlas.base.commands.impl.ScalingCommand;
 import be.esmay.atlas.base.commands.impl.ServersCommand;
 import be.esmay.atlas.base.commands.impl.StopCommand;
+import be.esmay.atlas.base.commands.impl.TemplatesCommand;
 import be.esmay.atlas.base.utils.Logger;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
@@ -60,6 +61,7 @@ public final class CommandManager {
         this.registerCommand(new ScalingCommand());
         this.registerCommand(new MetricsCommand());
         this.registerCommand(new ConfigCommand());
+        this.registerCommand(new TemplatesCommand());
 
         try {
             this.terminal = TerminalBuilder.builder()

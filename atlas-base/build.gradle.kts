@@ -20,6 +20,10 @@ dependencies {
     
     implementation("io.netty:netty-all:4.1.100.Final")
     implementation("com.google.code.gson:gson:2.10.1")
+    
+    implementation("software.amazon.awssdk:s3:2.26.0")
+    implementation("software.amazon.awssdk:core:2.26.0")
+    implementation("software.amazon.awssdk:auth:2.26.0")
 }
 
 tasks.withType<Jar> {

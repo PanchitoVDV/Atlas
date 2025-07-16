@@ -1551,8 +1551,9 @@ public final class DockerServiceProvider extends ServiceProvider {
             boolean downloadOnStartup = atlasBase.getConfigManager().getAtlasConfig().getAtlas().getTemplates().isDownloadOnStartup();
 
             if (downloadOnStartup && groupConfig.getTemplates() != null && !groupConfig.getTemplates().isEmpty()) {
-                TemplateManager templateManager = new TemplateManager();
+                TemplateManager templateManager = new TemplateManager(atlasBase.getConfigManager().getAtlasConfig().getAtlas().getTemplates());
                 templateManager.applyTemplates(server.getWorkingDirectory(), groupConfig.getTemplates());
+                templateManager.close();
                 Logger.debug("Applied templates to server: {}", server.getName());
             } else {
                 Logger.debug("Skipping template application for server: {} (downloadOnStartup={}, templates={})",
