@@ -722,7 +722,7 @@ public final class DockerServiceProvider extends ServiceProvider {
             labels.put("atlas.dynamic", String.valueOf(atlasServer.getType().name().equals("DYNAMIC")));
 
             CreateContainerCmd createCmd = this.dockerClient.createContainerCmd(dockerGroupConfig.getImage())
-                    .withName("atlas-" + atlasServer.getServerId())
+                    .withName("atlas-" + atlasServer.getName())
                     .withLabels(labels)
                     .withEnv(envVars)
                     .withBinds(this.createBinds(dockerGroupConfig, atlasServer))
@@ -747,6 +747,10 @@ public final class DockerServiceProvider extends ServiceProvider {
 
             if (dockerGroupConfig.getCommand() != null && !dockerGroupConfig.getCommand().isEmpty()) {
                 createCmd = createCmd.withCmd(dockerGroupConfig.getCommand().split(" "));
+            }
+
+            if (dockerGroupConfig.getWorkingDirectory() != null && !dockerGroupConfig.getWorkingDirectory().isEmpty()) {
+                createCmd = createCmd.withWorkingDir(dockerGroupConfig.getWorkingDirectory());
             }
 
             CreateContainerResponse container = createCmd.exec();
@@ -911,6 +915,21 @@ public final class DockerServiceProvider extends ServiceProvider {
 
     private String determineHostIpForContainers() {
         try {
+            Network network = this.dockerClient.inspectNetworkCmd().withNetworkId(this.dockerConfig.getNetwork()).exec();
+            if (network != null && network.getIpam() != null && network.getIpam().getConfig() != null) {
+                for (Network.Ipam.Config config : network.getIpam().getConfig()) {
+                    if (config.getGateway() != null) {
+                        String gatewayIp = config.getGateway();
+                        Logger.debug("Using Docker network gateway IP for Atlas host: {}", gatewayIp);
+                        return gatewayIp;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Logger.warn("Failed to get Docker network gateway: {}", e.getMessage());
+        }
+
+        try {
             NetworkInterface networkInterface = NetworkInterface.getByName("eth0");
             if (networkInterface == null) {
                 networkInterface = NetworkInterface.getByName("en0");
@@ -930,25 +949,14 @@ public final class DockerServiceProvider extends ServiceProvider {
                 Enumeration<InetAddress> addresses = networkInterface.getInetAddresses();
                 while (addresses.hasMoreElements()) {
                     InetAddress address = addresses.nextElement();
-                    if (!address.isLoopbackAddress() && address instanceof Inet4Address) {
-                        Logger.debug("Using host IP for Atlas host: {}", address.getHostAddress());
+                    if (!address.isLoopbackAddress() && address instanceof Inet4Address && !address.isSiteLocalAddress()) {
+                        Logger.debug("Using public IP for Atlas host: {}", address.getHostAddress());
                         return address.getHostAddress();
                     }
                 }
             }
         } catch (Exception e) {
             Logger.warn("Failed to get host network interface: {}", e.getMessage());
-        }
-
-        try {
-            InetAddress localHost = InetAddress.getLocalHost();
-            String hostAddress = localHost.getHostAddress();
-            if (!hostAddress.equals("127.0.0.1")) {
-                Logger.debug("Using local host IP for Atlas host: {}", hostAddress);
-                return hostAddress;
-            }
-        } catch (Exception e) {
-            Logger.warn("Failed to resolve local host: {}", e.getMessage());
         }
 
         Logger.info("Using fallback Docker bridge gateway IP for Atlas host: 172.17.0.1");

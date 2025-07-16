@@ -107,12 +107,13 @@ public abstract class Scaler {
 
     public CompletableFuture<Void> upscale() {
         ServerType serverType = ServerType.valueOf(this.scalerConfig.getGroup().getServer().getType().toUpperCase());
-        String serverId = this.getNextIdentifier();
-        Logger.info("Manually scaling up server: {} for group: {}", serverId, this.groupName);
+        String serverName = this.getNextIdentifier();
+        String serverId = UUID.randomUUID().toString();
+        Logger.info("Manually scaling up server: {} (ID: {}) for group: {}", serverName, serverId, this.groupName);
 
         AtlasServer server = AtlasServer.builder()
                 .serverId(serverId)
-                .name(serverId)
+                .name(serverName)
                 .group(this.groupName)
                 .type(serverType)
                 .createdAt(System.currentTimeMillis())
@@ -162,12 +163,13 @@ public abstract class Scaler {
 
     private CompletableFuture<Void> createAutoScaledServer() {
         ServerType serverType = ServerType.valueOf(this.scalerConfig.getGroup().getServer().getType().toUpperCase());
-        String serverId = this.getNextIdentifier();
-        Logger.debug("Creating auto-scaled server: {} for group: {}", serverId, this.groupName);
+        String serverName = this.getNextIdentifier();
+        String serverId = UUID.randomUUID().toString();
+        Logger.debug("Creating auto-scaled server: {} (ID: {}) for group: {}", serverName, serverId, this.groupName);
 
         AtlasServer server = AtlasServer.builder()
                 .serverId(serverId)
-                .name(serverId)
+                .name(serverName)
                 .group(this.groupName)
                 .type(serverType)
                 .createdAt(System.currentTimeMillis())

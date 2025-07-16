@@ -27,5 +27,6 @@ group:
       memory: "2G"
       cpu: "1.0"
       command: "java -Xmx1536M -Xms1536M -jar server.jar nogui"
+      working-directory: "/data"
       environment:
         VERSION: "1.21.5"

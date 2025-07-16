@@ -24,6 +24,7 @@ group:
     docker:
       image: "itzg/mc-proxy:latest"
       volume-mount-path: "/server"
+      working-directory: "/server"
       memory: "1G"
       cpu: "0.5"
       environment:

@@ -118,5 +118,8 @@ public final class ScalerConfig extends ConfigurateConfig {
         @Setting("volume-mount-path")
         private String volumeMountPath;
 
+        @Setting("working-directory")
+        private String workingDirectory;
+
     }
 }
