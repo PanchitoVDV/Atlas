@@ -1,12 +1,8 @@
 package be.esmay.atlas.velocity;
 
-import be.esmay.atlas.velocity.api.AtlasVelocityAPI;
-import be.esmay.atlas.velocity.cache.NetworkServerCacheManager;
-import be.esmay.atlas.velocity.listeners.ProxyPlayerEventListener;
-import be.esmay.atlas.velocity.network.AtlasNetworkClient;
-import be.esmay.atlas.velocity.proxy.ProxyServerInfoManager;
-import be.esmay.atlas.velocity.registry.VelocityServerRegistryManager;
 import com.google.inject.Inject;
+import com.jazzkuh.modulemanager.velocity.IVelocityPlugin;
+import com.jazzkuh.modulemanager.velocity.VelocityModuleManager;
 import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.event.proxy.ProxyInitializeEvent;
 import com.velocitypowered.api.event.proxy.ProxyShutdownEvent;
@@ -26,20 +22,17 @@ import java.nio.file.Path;
         description = "Atlas server management plugin for Velocity",
         authors = {"Esmaybe"}
 )
-public final class AtlasVelocityPlugin {
+public final class AtlasVelocityPlugin implements IVelocityPlugin {
 
     @Getter
     private static AtlasVelocityPlugin instance;
 
+    @Getter
+    private static VelocityModuleManager<AtlasVelocityPlugin> moduleManager;
+
     private final ProxyServer proxyServer;
     private final Logger logger;
     private final Path dataDirectory;
-
-    private AtlasNetworkClient networkClient;
-    private NetworkServerCacheManager cacheManager;
-    private ProxyServerInfoManager serverInfoManager;
-    private VelocityServerRegistryManager registryManager;
-    private ProxyPlayerEventListener playerEventListener;
 
     @Inject
     public AtlasVelocityPlugin(ProxyServer proxyServer, Logger logger, @DataDirectory Path dataDirectory) {
@@ -48,59 +41,17 @@ public final class AtlasVelocityPlugin {
         this.proxyServer = proxyServer;
         this.logger = logger;
         this.dataDirectory = dataDirectory;
+
+        moduleManager = new VelocityModuleManager<>(this, this.logger);
+        moduleManager.scanModules(getClass());
+        moduleManager.load();
     }
 
     @Subscribe
     public void onProxyInitialization(ProxyInitializeEvent event) {
         this.logger.info("Initializing Atlas Velocity plugin...");
 
-        String atlasHost = System.getenv("ATLAS_HOST");
-        String atlasPortStr = System.getenv("ATLAS_PORT");
-        String authToken = System.getenv("ATLAS_NETTY_KEY");
-        String serverId = System.getenv("SERVER_UUID");
-
-        if (atlasHost == null || atlasPortStr == null || authToken == null || serverId == null) {
-            this.logger.error("Missing required environment variables:");
-            this.logger.error("ATLAS_HOST: {}", atlasHost);
-            this.logger.error("ATLAS_PORT: {}", atlasPortStr);
-            this.logger.error("ATLAS_NETTY_KEY: {}", authToken != null ? "[REDACTED]" : "null");
-            this.logger.error("SERVER_UUID: {}", serverId);
-            return;
-        }
-
-        int atlasPort;
-        try {
-            atlasPort = Integer.parseInt(atlasPortStr);
-        } catch (NumberFormatException e) {
-            this.logger.error("Invalid ATLAS_BASE_PORT: {}", atlasPortStr);
-            return;
-        }
-
-        this.cacheManager = new NetworkServerCacheManager();
-        this.cacheManager.setProxyServer(this.proxyServer);
-        this.serverInfoManager = new ProxyServerInfoManager(this.proxyServer);
-        this.registryManager = new VelocityServerRegistryManager(this.proxyServer);
-
-        this.networkClient = new AtlasNetworkClient(
-                atlasHost,
-                atlasPort,
-                authToken,
-                serverId,
-                this.cacheManager,
-                this.serverInfoManager,
-                this.registryManager,
-                this.proxyServer,
-                this.logger
-        );
-
-        this.playerEventListener = new ProxyPlayerEventListener(this.networkClient);
-        this.proxyServer.getEventManager().register(this, this.playerEventListener);
-
-        AtlasVelocityAPI.initialize(this.cacheManager, this.serverInfoManager);
-        this.networkClient.connect().thenRun(() -> this.logger.info("Successfully connected to Atlas base")).exceptionally(throwable -> {
-            this.logger.error("Failed to connect to Atlas base", throwable);
-            return null;
-        });
+        moduleManager.enable();
 
         this.logger.info("Atlas Velocity plugin initialized successfully");
     }
@@ -109,15 +60,7 @@ public final class AtlasVelocityPlugin {
     public void onProxyShutdown(ProxyShutdownEvent event) {
         this.logger.info("Shutting down Atlas Velocity plugin...");
 
-        if (this.networkClient != null) {
-            this.networkClient.disconnect();
-        }
-
-        if (this.playerEventListener != null) {
-            this.proxyServer.getEventManager().unregisterListener(this, this.playerEventListener);
-        }
-
-        AtlasVelocityAPI.shutdown();
+        moduleManager.disable();
 
         this.logger.info("Atlas Velocity plugin shut down successfully");
     }

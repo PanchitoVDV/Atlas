@@ -1,4 +1,4 @@
-package be.esmay.atlas.velocity.proxy;
+package be.esmay.atlas.velocity.modules.scaling.proxy;
 
 import be.esmay.atlas.common.enums.ServerStatus;
 import be.esmay.atlas.common.models.ServerInfo;

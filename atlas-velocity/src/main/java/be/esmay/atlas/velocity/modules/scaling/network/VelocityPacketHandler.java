@@ -1,5 +1,6 @@
-package be.esmay.atlas.velocity.network;
+package be.esmay.atlas.velocity.modules.scaling.network;
 
+import be.esmay.atlas.common.models.AtlasServer;
 import be.esmay.atlas.common.network.packet.Packet;
 import be.esmay.atlas.common.network.packet.PacketHandler;
 import be.esmay.atlas.common.network.packet.packets.AtlasServerUpdatePacket;
@@ -13,8 +14,8 @@ import be.esmay.atlas.common.network.packet.packets.ServerListPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerListRequestPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerRemovePacket;
 import be.esmay.atlas.common.network.packet.packets.ServerUpdatePacket;
-import be.esmay.atlas.velocity.cache.NetworkServerCacheManager;
-import be.esmay.atlas.velocity.registry.VelocityServerRegistryManager;
+import be.esmay.atlas.velocity.modules.scaling.cache.NetworkServerCacheManager;
+import be.esmay.atlas.velocity.modules.scaling.registry.VelocityServerRegistryManager;
 import com.velocitypowered.api.command.CommandManager;
 import com.velocitypowered.api.command.CommandSource;
 import com.velocitypowered.api.proxy.ProxyServer;
@@ -117,8 +118,14 @@ public final class VelocityPacketHandler extends SimpleChannelInboundHandler<Pac
     public void handleServerRemove(ServerRemovePacket packet) {
         this.logger.debug("Server remove received: {} (reason: {})", packet.getServerId(), packet.getReason());
 
+        AtlasServer atlasServer = this.cacheManager.getServer(packet.getServerId()).orElse(null);
+        if (atlasServer == null) {
+            this.logger.warn("Received ServerRemovePacket for unknown server: {}", packet.getServerId());
+            return;
+        }
+
         this.cacheManager.removeServer(packet.getServerId());
-        this.registryManager.handleServerRemove(packet.getServerId());
+        this.registryManager.handleServerRemove(atlasServer.getName());
     }
 
     @Override

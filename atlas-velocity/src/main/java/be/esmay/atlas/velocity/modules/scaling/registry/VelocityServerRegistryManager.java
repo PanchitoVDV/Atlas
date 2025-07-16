@@ -1,4 +1,4 @@
-package be.esmay.atlas.velocity.registry;
+package be.esmay.atlas.velocity.modules.scaling.registry;
 
 import be.esmay.atlas.common.enums.ServerStatus;
 import be.esmay.atlas.common.models.AtlasServer;
@@ -26,8 +26,8 @@ public final class VelocityServerRegistryManager {
         this.addServerToVelocity(atlasServer);
     }
 
-    public void handleServerRemove(String serverId) {
-        this.removeServerFromVelocity(serverId);
+    public void handleServerRemove(String serverName) {
+        this.removeServerFromVelocity(serverName);
     }
 
     public void handleAtlasServerUpdate(AtlasServer atlasServer) {
@@ -35,24 +35,24 @@ public final class VelocityServerRegistryManager {
             return;
 
         if (atlasServer.getServerInfo() == null || atlasServer.getServerInfo().getStatus() == ServerStatus.STOPPED || atlasServer.getServerInfo().getStatus() == ServerStatus.ERROR) {
-            this.removeServerFromVelocity(atlasServer.getServerId());
+            this.removeServerFromVelocity(atlasServer.getName());
             return;
         }
 
-        if (this.managedServers.contains(atlasServer.getServerId())) return;
+        if (this.managedServers.contains(atlasServer.getName())) return;
         this.addServerToVelocity(atlasServer);
     }
 
     private void addServerToVelocity(AtlasServer atlasServer) {
-        String serverId = atlasServer.getServerId();
-        Optional<RegisteredServer> existingServer = this.proxyServer.getServer(serverId);
+        String serverName = atlasServer.getName();
+        Optional<RegisteredServer> existingServer = this.proxyServer.getServer(serverName);
 
         if (existingServer.isEmpty()) {
             InetSocketAddress address = new InetSocketAddress(atlasServer.getAddress(), atlasServer.getPort());
-            ServerInfo velocityServerInfo = new ServerInfo(serverId, address);
+            ServerInfo velocityServerInfo = new ServerInfo(serverName, address);
 
             this.proxyServer.registerServer(velocityServerInfo);
-            this.managedServers.add(serverId);
+            this.managedServers.add(serverName);
 
             AtlasVelocityPlugin.getInstance().getLogger().info("Registered server in Velocity: {} at {}", atlasServer.getName(), address);
             return;
@@ -68,20 +68,20 @@ public final class VelocityServerRegistryManager {
             return;
 
         this.proxyServer.unregisterServer(velocityServerInfo);
-        ServerInfo newVelocityServerInfo = new ServerInfo(serverId, newAddress);
+        ServerInfo newVelocityServerInfo = new ServerInfo(serverName, newAddress);
         this.proxyServer.registerServer(newVelocityServerInfo);
     }
 
-    private void removeServerFromVelocity(String serverId) {
-        Optional<RegisteredServer> server = this.proxyServer.getServer(serverId);
+    private void removeServerFromVelocity(String serverName) {
+        Optional<RegisteredServer> server = this.proxyServer.getServer(serverName);
 
-        if (server.isEmpty() || !this.managedServers.contains(serverId))
+        if (server.isEmpty() || !this.managedServers.contains(serverName))
             return;
 
         this.proxyServer.unregisterServer(server.get().getServerInfo());
-        this.managedServers.remove(serverId);
+        this.managedServers.remove(serverName);
 
-        AtlasVelocityPlugin.getInstance().getLogger().info("Unregistered server in Velocity: {}", serverId);
+        AtlasVelocityPlugin.getInstance().getLogger().info("Unregistered server in Velocity: {}", serverName);
     }
 
     private boolean isProxyServer(AtlasServer atlasServer) {

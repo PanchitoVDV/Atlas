@@ -1,4 +1,4 @@
-package be.esmay.atlas.velocity.network;
+package be.esmay.atlas.velocity.modules.scaling.network;
 
 import be.esmay.atlas.common.network.packet.Packet;
 import be.esmay.atlas.common.network.packet.PacketDecoder;
@@ -7,9 +7,9 @@ import be.esmay.atlas.common.network.packet.packets.HandshakePacket;
 import be.esmay.atlas.common.network.packet.packets.HeartbeatPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerInfoUpdatePacket;
 import be.esmay.atlas.common.network.packet.packets.ServerListRequestPacket;
-import be.esmay.atlas.velocity.cache.NetworkServerCacheManager;
-import be.esmay.atlas.velocity.proxy.ProxyServerInfoManager;
-import be.esmay.atlas.velocity.registry.VelocityServerRegistryManager;
+import be.esmay.atlas.velocity.modules.scaling.cache.NetworkServerCacheManager;
+import be.esmay.atlas.velocity.modules.scaling.proxy.ProxyServerInfoManager;
+import be.esmay.atlas.velocity.modules.scaling.registry.VelocityServerRegistryManager;
 import com.velocitypowered.api.proxy.ProxyServer;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;

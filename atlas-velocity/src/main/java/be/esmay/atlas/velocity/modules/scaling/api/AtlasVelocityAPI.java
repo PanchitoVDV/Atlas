@@ -1,10 +1,10 @@
-package be.esmay.atlas.velocity.api;
+package be.esmay.atlas.velocity.modules.scaling.api;
 
 import be.esmay.atlas.common.enums.ServerStatus;
 import be.esmay.atlas.common.models.AtlasServer;
 import be.esmay.atlas.common.models.ServerInfo;
-import be.esmay.atlas.velocity.cache.NetworkServerCacheManager;
-import be.esmay.atlas.velocity.proxy.ProxyServerInfoManager;
+import be.esmay.atlas.velocity.modules.scaling.cache.NetworkServerCacheManager;
+import be.esmay.atlas.velocity.modules.scaling.proxy.ProxyServerInfoManager;
 import lombok.experimental.UtilityClass;
 
 import java.util.Collection;

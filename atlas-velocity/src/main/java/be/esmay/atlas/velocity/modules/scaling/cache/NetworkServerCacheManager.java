@@ -1,8 +1,8 @@
-package be.esmay.atlas.velocity.cache;
+package be.esmay.atlas.velocity.modules.scaling.cache;
 
 import be.esmay.atlas.common.enums.ServerStatus;
 import be.esmay.atlas.common.models.AtlasServer;
-import be.esmay.atlas.velocity.events.AtlasServerUpdateEvent;
+import be.esmay.atlas.velocity.modules.scaling.events.AtlasServerUpdateEvent;
 import com.velocitypowered.api.proxy.ProxyServer;
 import lombok.Getter;
 import lombok.Setter;

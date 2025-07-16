@@ -1,4 +1,4 @@
-package be.esmay.atlas.velocity.events;
+package be.esmay.atlas.velocity.modules.scaling.events;
 
 import be.esmay.atlas.common.models.AtlasServer;
 import lombok.Getter;

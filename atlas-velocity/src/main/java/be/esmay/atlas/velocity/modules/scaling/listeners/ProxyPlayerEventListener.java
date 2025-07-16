@@ -1,14 +1,11 @@
-package be.esmay.atlas.velocity.listeners;
+package be.esmay.atlas.velocity.modules.scaling.listeners;
 
 import be.esmay.atlas.velocity.AtlasVelocityPlugin;
-import be.esmay.atlas.velocity.network.AtlasNetworkClient;
-import be.esmay.atlas.velocity.proxy.ProxyServerInfoManager;
+import be.esmay.atlas.velocity.modules.scaling.network.AtlasNetworkClient;
 import com.velocitypowered.api.event.PostOrder;
 import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.event.connection.DisconnectEvent;
 import com.velocitypowered.api.event.connection.PostLoginEvent;
-import com.velocitypowered.api.event.player.ServerConnectedEvent;
-import com.velocitypowered.api.proxy.Player;
 import lombok.RequiredArgsConstructor;
 
 import java.util.concurrent.TimeUnit;
