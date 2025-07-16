@@ -36,6 +36,7 @@ public abstract class Scaler {
     protected final ServerLifecycleService lifecycleService;
     protected final Map<String, AtlasServer> servers = new ConcurrentHashMap<>();
     protected final Set<String> pendingRemovals = ConcurrentHashMap.newKeySet();
+    protected final Set<String> reservedNames = ConcurrentHashMap.newKeySet();
 
     protected volatile boolean shutdown = false;
     protected volatile boolean paused = false;
@@ -60,13 +61,18 @@ public abstract class Scaler {
                 .filter(num -> num > 0)
                 .collect(Collectors.toSet());
 
+        Set<Integer> reservedNumbers = this.reservedNames.stream()
+                .map(this::extractServerNumber)
+                .filter(num -> num > 0)
+                .collect(Collectors.toSet());
+
         for (int i = 1; i <= this.getMaxServers(); i++) {
-            if (!usedNumbers.contains(i)) {
+            if (!usedNumbers.contains(i) && !reservedNumbers.contains(i)) {
                 return i;
             }
         }
 
-        return usedNumbers.size() + 1;
+        return usedNumbers.size() + reservedNumbers.size() + 1;
     }
 
     public void scaleServers() {
@@ -121,7 +127,7 @@ public abstract class Scaler {
                 .shutdown(false)
                 .build();
         
-        CompletableFuture<AtlasServer> createFuture = this.serviceProvider.startServerCompletely(server, StartOptions.userCommand());
+        CompletableFuture<AtlasServer> createFuture = this.serviceProvider.startServerCompletely(server, StartOptions.scalingUp());
 
         CompletableFuture<Void> acceptFuture = createFuture.thenAccept(startedServer -> {
             this.addServer(startedServer);
@@ -130,6 +136,7 @@ public abstract class Scaler {
 
         return acceptFuture.exceptionally(throwable -> {
             Logger.error("Failed to create manual server: {}", serverId, throwable);
+            this.reservedNames.remove(serverName);
             return null;
         });
     }
@@ -186,6 +193,7 @@ public abstract class Scaler {
 
         return acceptFuture.exceptionally(throwable -> {
             Logger.error("Failed to create auto-scaled server: {}", serverId, throwable);
+            this.reservedNames.remove(serverName);
             return null;
         });
     }
@@ -256,7 +264,7 @@ public abstract class Scaler {
         this.servers.clear();
     }
 
-    public String getNextIdentifier() {
+    public synchronized String getNextIdentifier() {
         String pattern = this.scalerConfig.getGroup().getServer().getNaming().getNamePattern();
 
         if (pattern == null || pattern.isEmpty()) {
@@ -269,7 +277,9 @@ public abstract class Scaler {
         }
 
         int nextNumber = this.getLowestAvailableNumber();
-        return pattern.replace("{id}", String.valueOf(nextNumber));
+        String serverName = pattern.replace("{id}", String.valueOf(nextNumber));
+        this.reservedNames.add(serverName);
+        return serverName;
     }
 
     public void removeManualServer(String serverId) {
@@ -429,6 +439,7 @@ public abstract class Scaler {
 
     public void addServer(AtlasServer server) {
         this.servers.put(server.getServerId(), server);
+        this.reservedNames.remove(server.getName());
 
         if (server.getServerInfo() != null && server.getServerInfo().getStatus() == ServerStatus.RUNNING) {
             AtlasBase atlasInstance = AtlasBase.getInstance();
