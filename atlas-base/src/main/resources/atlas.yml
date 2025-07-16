@@ -33,5 +33,5 @@ atlas:
         ttl-seconds: 3600
 
   scaling:
-    check-interval: 5
-    cooldown: 30
+    check-interval: 1
+    cooldown: 5
