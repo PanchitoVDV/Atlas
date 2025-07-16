@@ -71,6 +71,7 @@ public final class OpenApiGenerator {
         paths.addPathItem("/api/v1/servers/{id}", createServerByIdPath());
         paths.addPathItem("/api/v1/servers/{id}/start", createServerActionPath("start"));
         paths.addPathItem("/api/v1/servers/{id}/stop", createServerActionPath("stop"));
+        paths.addPathItem("/api/v1/servers/{id}/command", createServerCommandPath());
         paths.addPathItem("/api/v1/groups", createGroupsPath());
         paths.addPathItem("/api/v1/groups/{group}/scale", createScalePath());
         paths.addPathItem("/api/v1/scaling", createScalingPath());
@@ -202,6 +203,43 @@ public final class OpenApiGenerator {
                         .content(new Content()
                             .addMediaType("application/json", new MediaType()
                                 .schema(new Schema<>().$ref("#/components/schemas/ApiResponse")))))
+                    .addApiResponse("404", new ApiResponse()
+                        .description("Server not found"))));
+    }
+
+    private static PathItem createServerCommandPath() {
+        Parameter serverIdParam = new Parameter()
+            .name("id")
+            .in("path")
+            .description("Server ID")
+            .required(true)
+            .style(Parameter.StyleEnum.SIMPLE)
+            .explode(false)
+            .schema(new StringSchema());
+
+        RequestBody requestBody = new RequestBody()
+            .description("Command to execute")
+            .required(true)
+            .content(new Content()
+                .addMediaType("application/json", new MediaType()
+                    .schema(new Schema<>().$ref("#/components/schemas/ServerCommandRequest"))));
+
+        return new PathItem()
+            .post(new Operation()
+                .operationId("executeServerCommand")
+                .summary("Execute command on server")
+                .description("Executes a command on the specified server via network communication")
+                .addTagsItem("Servers")
+                .addParametersItem(serverIdParam)
+                .requestBody(requestBody)
+                .responses(createStandardResponses()
+                    .addApiResponse("200", new ApiResponse()
+                        .description("Command executed successfully")
+                        .content(new Content()
+                            .addMediaType("application/json", new MediaType()
+                                .schema(new Schema<>().$ref("#/components/schemas/ApiResponse")))))
+                    .addApiResponse("400", new ApiResponse()
+                        .description("Invalid request - missing or empty command"))
                     .addApiResponse("404", new ApiResponse()
                         .description("Server not found"))));
     }
@@ -351,22 +389,22 @@ public final class OpenApiGenerator {
     }
 
     private static Map<String, Schema> createSchemas() {
-        return Map.of(
-            "ApiResponse", new ObjectSchema()
+        return Map.ofEntries(
+            Map.entry("ApiResponse", new ObjectSchema()
                 .addProperty("status", new StringSchema().example("success"))
                 .addProperty("data", new ObjectSchema().nullable(true))
                 .addProperty("message", new StringSchema().nullable(true))
-                .addProperty("timestamp", new Schema<>().type("integer").format("int64")),
+                .addProperty("timestamp", new Schema<>().type("integer").format("int64"))),
             
-            "StatusResponse", new ObjectSchema()
+            Map.entry("StatusResponse", new ObjectSchema()
                 .addProperty("status", new StringSchema().example("success"))
                 .addProperty("data", new ObjectSchema()
                     .addProperty("running", new Schema<>().type("boolean"))
                     .addProperty("debugMode", new Schema<>().type("boolean"))
                     .addProperty("uptime", new Schema<>().type("integer").format("int64")))
-                .addProperty("timestamp", new Schema<>().type("integer").format("int64")),
+                .addProperty("timestamp", new Schema<>().type("integer").format("int64"))),
             
-            "ServerInfo", new ObjectSchema()
+            Map.entry("ServerInfo", new ObjectSchema()
                 .addProperty("serverId", new StringSchema())
                 .addProperty("name", new StringSchema())
                 .addProperty("group", new StringSchema())
@@ -378,47 +416,51 @@ public final class OpenApiGenerator {
                 .addProperty("maxPlayers", new Schema<>().type("integer"))
                 .addProperty("manuallyScaled", new Schema<>().type("boolean"))
                 .addProperty("createdAt", new Schema<>().type("integer").format("int64"))
-                .addProperty("lastHeartbeat", new Schema<>().type("integer").format("int64")),
+                .addProperty("lastHeartbeat", new Schema<>().type("integer").format("int64"))),
             
-            "ServerListResponse", new ObjectSchema()
+            Map.entry("ServerListResponse", new ObjectSchema()
                 .addProperty("status", new StringSchema().example("success"))
                 .addProperty("data", new ArraySchema().items(new Schema<>().$ref("#/components/schemas/ServerInfo")))
-                .addProperty("timestamp", new Schema<>().type("integer").format("int64")),
+                .addProperty("timestamp", new Schema<>().type("integer").format("int64"))),
             
-            "ServerResponse", new ObjectSchema()
+            Map.entry("ServerResponse", new ObjectSchema()
                 .addProperty("status", new StringSchema().example("success"))
                 .addProperty("data", new Schema<>().$ref("#/components/schemas/ServerInfo"))
-                .addProperty("timestamp", new Schema<>().type("integer").format("int64")),
+                .addProperty("timestamp", new Schema<>().type("integer").format("int64"))),
             
-            "CreateServerRequest", new ObjectSchema()
+            Map.entry("CreateServerRequest", new ObjectSchema()
                 .addProperty("group", new StringSchema().description("Group name"))
                 .addProperty("count", new Schema<>().type("integer")._default(1).description("Number of servers to create"))
-                .required(List.of("group")),
+                .required(List.of("group"))),
             
-            "ScaleRequest", new ObjectSchema()
+            Map.entry("ScaleRequest", new ObjectSchema()
                 .addProperty("direction", new StringSchema().example("up").description("Scaling direction: 'up' or 'down'"))
                 .addProperty("count", new Schema<>().type("integer")._default(1).description("Number of servers to scale"))
-                .required(List.of("direction")),
+                .required(List.of("direction"))),
             
-            "GroupListResponse", new ObjectSchema()
+            Map.entry("ServerCommandRequest", new ObjectSchema()
+                .addProperty("command", new StringSchema().example("say Hello World!").description("Command to execute on the server"))
+                .required(List.of("command"))),
+            
+            Map.entry("GroupListResponse", new ObjectSchema()
                 .addProperty("status", new StringSchema().example("success"))
                 .addProperty("data", new ArraySchema().items(new StringSchema()))
-                .addProperty("timestamp", new Schema<>().type("integer").format("int64")),
+                .addProperty("timestamp", new Schema<>().type("integer").format("int64"))),
             
-            "ScalingResponse", new ObjectSchema()
+            Map.entry("ScalingResponse", new ObjectSchema()
                 .addProperty("status", new StringSchema().example("success"))
                 .addProperty("data", new ObjectSchema().additionalProperties(new ObjectSchema()
                     .addProperty("group", new StringSchema())
                     .addProperty("type", new StringSchema())))
-                .addProperty("timestamp", new Schema<>().type("integer").format("int64")),
+                .addProperty("timestamp", new Schema<>().type("integer").format("int64"))),
             
-            "MetricsResponse", new ObjectSchema()
+            Map.entry("MetricsResponse", new ObjectSchema()
                 .addProperty("status", new StringSchema().example("success"))
                 .addProperty("data", new ObjectSchema()
                     .addProperty("totalServers", new Schema<>().type("integer"))
                     .addProperty("totalPlayers", new Schema<>().type("integer"))
                     .addProperty("serversByStatus", new ObjectSchema().additionalProperties(new Schema<>().type("integer"))))
-                .addProperty("timestamp", new Schema<>().type("integer").format("int64"))
+                .addProperty("timestamp", new Schema<>().type("integer").format("int64")))
         );
     }
 }

@@ -7,16 +7,19 @@ import be.esmay.atlas.common.network.packet.packets.AuthenticationPacket;
 import be.esmay.atlas.common.network.packet.packets.HandshakePacket;
 import be.esmay.atlas.common.network.packet.packets.HeartbeatPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerAddPacket;
+import be.esmay.atlas.common.network.packet.packets.ServerCommandPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerInfoUpdatePacket;
 import be.esmay.atlas.common.network.packet.packets.ServerListPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerListRequestPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerRemovePacket;
 import be.esmay.atlas.common.network.packet.packets.ServerUpdatePacket;
+import be.esmay.atlas.spigot.AtlasSpigotPlugin;
 import be.esmay.atlas.spigot.cache.NetworkServerCacheManager;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import lombok.RequiredArgsConstructor;
 import lombok.Setter;
+import org.bukkit.Bukkit;
 
 import java.util.logging.Logger;
 
@@ -108,5 +111,23 @@ public final class SpigotPacketHandler extends SimpleChannelInboundHandler<Packe
 
     @Override
     public void handleServerListRequest(ServerListRequestPacket packet) {
+    }
+
+    @Override
+    public void handleServerCommand(ServerCommandPacket packet) {
+        Bukkit.getScheduler().runTask(AtlasSpigotPlugin.getInstance(), () -> {
+            try {
+                boolean success = Bukkit.dispatchCommand(Bukkit.getConsoleSender(), packet.getCommand());
+                if (success) {
+                    this.logger.info("Command executed successfully: " + packet.getCommand());
+                    return;
+                }
+
+                this.logger.warning("Command execution failed: " + packet.getCommand());
+            } catch (Exception e) {
+                this.logger.severe("Exception while executing command: " + packet.getCommand());
+                e.printStackTrace();
+            }
+        });
     }
 }

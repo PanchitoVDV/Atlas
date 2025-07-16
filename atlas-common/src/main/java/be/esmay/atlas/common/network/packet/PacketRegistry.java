@@ -5,6 +5,7 @@ import be.esmay.atlas.common.network.packet.packets.AuthenticationPacket;
 import be.esmay.atlas.common.network.packet.packets.HandshakePacket;
 import be.esmay.atlas.common.network.packet.packets.HeartbeatPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerAddPacket;
+import be.esmay.atlas.common.network.packet.packets.ServerCommandPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerInfoUpdatePacket;
 import be.esmay.atlas.common.network.packet.packets.ServerListPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerListRequestPacket;
@@ -31,6 +32,7 @@ public final class PacketRegistry {
         registerPacket(0x14, ServerListRequestPacket.class, ServerListRequestPacket::new);
         registerPacket(0x20, ServerInfoUpdatePacket.class, ServerInfoUpdatePacket::new);
         registerPacket(0x21, AtlasServerUpdatePacket.class, AtlasServerUpdatePacket::new);
+        registerPacket(0x30, ServerCommandPacket.class, ServerCommandPacket::new);
     }
     
     private static <T extends Packet> void registerPacket(int id, Class<T> clazz, Supplier<T> supplier) {

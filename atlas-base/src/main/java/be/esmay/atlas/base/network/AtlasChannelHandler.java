@@ -15,6 +15,7 @@ import be.esmay.atlas.common.network.packet.packets.AuthenticationPacket;
 import be.esmay.atlas.common.network.packet.packets.HandshakePacket;
 import be.esmay.atlas.common.network.packet.packets.HeartbeatPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerAddPacket;
+import be.esmay.atlas.common.network.packet.packets.ServerCommandPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerInfoUpdatePacket;
 import be.esmay.atlas.common.network.packet.packets.ServerListPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerListRequestPacket;
@@ -213,6 +214,24 @@ public final class AtlasChannelHandler extends SimpleChannelInboundHandler<Packe
         return atlasInstance.getScalerManager().getScalers().stream()
                 .flatMap(scaler -> scaler.getServers().stream())
                 .collect(Collectors.toList());
+    }
+
+    @Override
+    public void handleServerCommand(ServerCommandPacket packet) {
+        Logger.debug("Server command received: {} for server: {}", packet.getCommand(), packet.getServerId());
+
+        if (this.currentContext == null) {
+            Logger.warn("Server command received but no current context available");
+            return;
+        }
+
+        Connection connection = this.connectionManager.getConnection(this.currentContext.channel());
+        if (connection == null || !connection.isAuthenticated()) {
+            Logger.warn("Server command from unauthenticated connection");
+            return;
+        }
+
+        Logger.warn("Server command packet received by Atlas base: {} for server: {}. This packet should be handled by the target server.", packet.getCommand(), packet.getServerId());
     }
 
 }

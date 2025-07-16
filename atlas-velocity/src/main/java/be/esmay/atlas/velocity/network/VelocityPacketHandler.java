@@ -7,6 +7,7 @@ import be.esmay.atlas.common.network.packet.packets.AuthenticationPacket;
 import be.esmay.atlas.common.network.packet.packets.HandshakePacket;
 import be.esmay.atlas.common.network.packet.packets.HeartbeatPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerAddPacket;
+import be.esmay.atlas.common.network.packet.packets.ServerCommandPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerInfoUpdatePacket;
 import be.esmay.atlas.common.network.packet.packets.ServerListPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerListRequestPacket;
@@ -14,6 +15,9 @@ import be.esmay.atlas.common.network.packet.packets.ServerRemovePacket;
 import be.esmay.atlas.common.network.packet.packets.ServerUpdatePacket;
 import be.esmay.atlas.velocity.cache.NetworkServerCacheManager;
 import be.esmay.atlas.velocity.registry.VelocityServerRegistryManager;
+import com.velocitypowered.api.command.CommandManager;
+import com.velocitypowered.api.command.CommandSource;
+import com.velocitypowered.api.proxy.ProxyServer;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +29,7 @@ public final class VelocityPacketHandler extends SimpleChannelInboundHandler<Pac
 
     private final NetworkServerCacheManager cacheManager;
     private final VelocityServerRegistryManager registryManager;
+    private final ProxyServer proxyServer;
     private final Logger logger;
 
     @Setter
@@ -132,5 +137,25 @@ public final class VelocityPacketHandler extends SimpleChannelInboundHandler<Pac
     @Override
     public void handleServerListRequest(ServerListRequestPacket packet) {
         this.logger.debug("Server list request packet received (should not happen on client side)");
+    }
+
+    @Override
+    public void handleServerCommand(ServerCommandPacket packet) {
+        this.logger.debug("Server command received: {} for server: {}", packet.getCommand(), packet.getServerId());
+
+        CommandManager commandManager = this.proxyServer.getCommandManager();
+        CommandSource consoleSource = this.proxyServer.getConsoleCommandSource();
+
+        commandManager.executeImmediatelyAsync(consoleSource, packet.getCommand()).thenAccept(success -> {
+            if (success) {
+                this.logger.info("Command executed successfully: {}", packet.getCommand());
+                return;
+            }
+
+            this.logger.warn("Command execution failed: {}", packet.getCommand());
+        }).exceptionally(throwable -> {
+            this.logger.error("Exception while executing command: {}", packet.getCommand(), throwable);
+            return null;
+        });
     }
 }

@@ -89,6 +89,7 @@ public final class AtlasVelocityPlugin {
                 this.cacheManager,
                 this.serverInfoManager,
                 this.registryManager,
+                this.proxyServer,
                 this.logger
         );
 

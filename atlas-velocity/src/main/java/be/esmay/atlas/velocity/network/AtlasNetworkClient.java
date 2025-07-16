@@ -10,6 +10,7 @@ import be.esmay.atlas.common.network.packet.packets.ServerListRequestPacket;
 import be.esmay.atlas.velocity.cache.NetworkServerCacheManager;
 import be.esmay.atlas.velocity.proxy.ProxyServerInfoManager;
 import be.esmay.atlas.velocity.registry.VelocityServerRegistryManager;
+import com.velocitypowered.api.proxy.ProxyServer;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
@@ -39,6 +40,7 @@ public final class AtlasNetworkClient {
     private final NetworkServerCacheManager cacheManager;
     private final ProxyServerInfoManager serverInfoManager;
     private final VelocityServerRegistryManager registryManager;
+    private final ProxyServer proxyServer;
     private final Logger logger;
 
     private final AtomicBoolean connected = new AtomicBoolean(false);
@@ -79,6 +81,7 @@ public final class AtlasNetworkClient {
                     VelocityPacketHandler handler = new VelocityPacketHandler(
                             AtlasNetworkClient.this.cacheManager,
                             AtlasNetworkClient.this.registryManager,
+                            AtlasNetworkClient.this.proxyServer,
                             AtlasNetworkClient.this.logger
                     );
 

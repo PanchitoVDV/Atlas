@@ -128,6 +128,7 @@ public final class WebSocketManager {
                 case "server-start" -> this.handleServerStart(connection, messageJson);
                 case "server-stop" -> this.handleServerStop(connection, messageJson);
                 case "server-restart" -> this.handleServerRestart(connection, messageJson);
+                case "server-command" -> this.handleServerCommand(connection, messageJson);
                 case "server-create" -> this.handleServerCreate(connection, messageJson);
                 case "server-remove" -> this.handleServerRemove(connection, messageJson);
                 case "scale" -> this.handleScale(connection, messageJson);
@@ -218,6 +219,24 @@ public final class WebSocketManager {
         
         this.executeServerAction(connection, commandId, connection.getServerId(), "remove", 
             server -> AtlasBase.getInstance().getServerManager().removeServer(server));
+    }
+
+    private void handleServerCommand(WebSocketConnection connection, JsonObject message) {
+        String commandId = message.getString("id", UUID.randomUUID().toString());
+        String command = message.getString("command");
+        String serverId = message.getString("serverId", connection.getServerId());
+
+        if (command == null || command.trim().isEmpty()) {
+            this.sendMessage(connection, WebSocketMessage.commandResult(commandId, false, "Command is required"));
+            return;
+        }
+
+        AtlasBase.getInstance().getServerManager().sendCommand(serverId, command)
+            .thenRun(() -> this.sendMessage(connection, WebSocketMessage.commandResult(commandId, true, "Command executed successfully")))
+            .exceptionally(throwable -> {
+                this.sendMessage(connection, WebSocketMessage.commandResult(commandId, false, "Failed to execute command: " + throwable.getMessage()));
+                return null;
+            });
     }
 
     private void handleScale(WebSocketConnection connection, JsonObject message) {

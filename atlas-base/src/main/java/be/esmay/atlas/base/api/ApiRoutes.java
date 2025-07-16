@@ -46,6 +46,7 @@ public final class ApiRoutes {
         this.router.post("/api/v1/servers").handler(this::createServers);
         this.router.post("/api/v1/servers/:id/start").handler(this::startServer);
         this.router.post("/api/v1/servers/:id/stop").handler(this::stopServer);
+        this.router.post("/api/v1/servers/:id/command").handler(this::executeServerCommand);
         this.router.delete("/api/v1/servers/:id").handler(this::removeServer);
         this.router.post("/api/v1/groups/:group/scale").handler(this::scaleGroup);
     }
@@ -189,6 +190,29 @@ public final class ApiRoutes {
         String serverId = context.pathParam("id");
         this.executeServerAction(context, serverId, "remove", 
             server -> AtlasBase.getInstance().getServerManager().removeServer(server));
+    }
+
+    private void executeServerCommand(RoutingContext context) {
+        String serverId = context.pathParam("id");
+        JsonObject body = context.body().asJsonObject();
+
+        if (body == null || !body.containsKey("command")) {
+            this.sendError(context, "Missing required field: command", 400);
+            return;
+        }
+
+        String command = body.getString("command");
+        if (command == null || command.trim().isEmpty()) {
+            this.sendError(context, "Command cannot be empty", 400);
+            return;
+        }
+
+        AtlasBase.getInstance().getServerManager().sendCommand(serverId, command)
+            .thenRun(() -> this.sendResponse(context, ApiResponse.success(null, "Command executed successfully")))
+            .exceptionally(throwable -> {
+                this.sendError(context, "Failed to execute command: " + throwable.getMessage());
+                return null;
+            });
     }
 
     private void scaleGroup(RoutingContext context) {

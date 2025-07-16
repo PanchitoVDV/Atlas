@@ -60,6 +60,7 @@ public final class ServersCommand implements AtlasCommand {
             case "start" -> this.handleStart(args);
             case "stop" -> this.handleStop(args);
             case "restart" -> this.handleRestart(args);
+            case "command" -> this.handleCommand(args);
             case "help" -> this.showHelp();
             default -> {
                 Logger.error("Unknown subcommand: " + subcommand);
@@ -77,15 +78,16 @@ public final class ServersCommand implements AtlasCommand {
         Logger.info("Usage: servers <subcommand> [args]");
         Logger.info("");
         Logger.info("Subcommands:");
-        Logger.info("  list [group]                List servers (all or by group)");
-        Logger.info("  status <server-id|name>     Show detailed server information");
-        Logger.info("  create <group> [count]      Create manual servers");
-        Logger.info("  remove <server-id|name>     Remove a specific server");
-        Logger.info("  logs <server-id|name> [n]   Show last n lines of server logs");
-        Logger.info("  watch <server-id|name>      Toggle real-time log watching for a server");
-        Logger.info("  start <server-id|name>      Start a stopped server");
-        Logger.info("  stop <server-id|name>       Stop a running server");
-        Logger.info("  restart <server-id|name>    Restart a server");
+        Logger.info("  list [group]                          List servers (all or by group)");
+        Logger.info("  status <server-id|name>               Show detailed server information");
+        Logger.info("  create <group> [count]                Create manual servers");
+        Logger.info("  remove <server-id|name>               Remove a specific server");
+        Logger.info("  logs <server-id|name> [n]             Show last n lines of server logs");
+        Logger.info("  watch <server-id|name>                Toggle real-time log watching for a server");
+        Logger.info("  start <server-id|name>                Start a stopped server");
+        Logger.info("  stop <server-id|name>                 Stop a running server");
+        Logger.info("  restart <server-id|name>              Restart a server");
+        Logger.info("  command <server-id|name> <command>    Send command to server");
         Logger.info("");
         Logger.info("Examples:");
         Logger.info("  servers list");
@@ -98,6 +100,7 @@ public final class ServersCommand implements AtlasCommand {
         Logger.info("  servers start lobby-1");
         Logger.info("  servers stop lobby-1");
         Logger.info("  servers restart lobby-1");
+        Logger.info("  servers command lobby-1 say Hello World!");
     }
 
     private CompletableFuture<Optional<AtlasServer>> findServerByIdOrName(ServiceProvider provider, String identifier) {
@@ -456,6 +459,23 @@ public final class ServersCommand implements AtlasCommand {
             Logger.error("Failed to find server: " + throwable.getMessage());
             return null;
         });
+    }
+
+    private void handleCommand(String[] args) {
+        if (args.length < 3) {
+            Logger.error("Usage: servers command <server-id|name> <command>");
+            return;
+        }
+
+        String serverIdentifier = args[1];
+        String command = String.join(" ", Arrays.copyOfRange(args, 2, args.length));
+
+        AtlasBase.getInstance().getServerManager().sendCommand(serverIdentifier, command)
+                .thenRun(() -> Logger.info("Command sent successfully"))
+                .exceptionally(throwable -> {
+                    Logger.error("Failed to send command: " + throwable.getMessage());
+                    return null;
+                });
     }
 
 }
