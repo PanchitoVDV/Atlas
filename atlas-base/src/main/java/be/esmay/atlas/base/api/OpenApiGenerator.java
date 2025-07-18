@@ -75,6 +75,7 @@ public final class OpenApiGenerator {
         paths.addPathItem("/api/v1/servers/{id}/stop", createServerActionPath("stop"));
         paths.addPathItem("/api/v1/servers/{id}/command", createServerCommandPath());
         paths.addPathItem("/api/v1/groups", createGroupsPath());
+        paths.addPathItem("/api/v1/groups/{name}", createGroupByNamePath());
         paths.addPathItem("/api/v1/groups/{group}/scale", createScalePath());
         paths.addPathItem("/api/v1/scaling", createScalingPath());
         paths.addPathItem("/api/v1/metrics", createMetricsPath());
@@ -309,6 +310,34 @@ public final class OpenApiGenerator {
                         .content(new Content()
                             .addMediaType("application/json", new MediaType()
                                 .schema(new Schema<>().$ref("#/components/schemas/GroupListResponse")))))));
+    }
+
+    private static PathItem createGroupByNamePath() {
+        Parameter groupNameParam = new Parameter()
+            .name("name")
+            .in("path")
+            .description("Group name")
+            .required(true)
+            .style(Parameter.StyleEnum.SIMPLE)
+            .explode(false)
+            .schema(new StringSchema());
+
+        return new PathItem()
+            .get(new Operation()
+                .operationId("getGroup")
+                .summary("Get group details")
+                .description("Returns detailed information about a specific scaling group")
+                .addTagsItem("Scaling")
+                .addSecurityItem(new SecurityRequirement().addList("bearerAuth"))
+                .addParametersItem(groupNameParam)
+                .responses(createStandardResponses()
+                    .addApiResponse("200", new ApiResponse()
+                        .description("Group details")
+                        .content(new Content()
+                            .addMediaType("application/json", new MediaType()
+                                .schema(new Schema<>().$ref("#/components/schemas/GroupResponse")))))
+                    .addApiResponse("404", new ApiResponse()
+                        .description("Group not found"))));
     }
 
     private static PathItem createScalePath() {
@@ -564,6 +593,11 @@ public final class OpenApiGenerator {
                     .addProperty("scaleDownThreshold", new Schema<>().type("number").format("double").example(0.25).description("Utilization threshold to trigger scale down"))
                     .nullable(true)
                     .description("Scaling configuration (if available)"))),
+            
+            Map.entry("GroupResponse", new ObjectSchema()
+                .addProperty("status", new StringSchema().example("success"))
+                .addProperty("data", new Schema<>().$ref("#/components/schemas/GroupInfo"))
+                .addProperty("timestamp", new Schema<>().type("integer").format("int64").example(1752700258719L))),
             
             Map.entry("ScalingResponse", new ObjectSchema()
                 .addProperty("status", new StringSchema().example("success"))

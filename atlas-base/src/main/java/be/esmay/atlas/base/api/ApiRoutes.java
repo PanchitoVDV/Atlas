@@ -17,6 +17,7 @@ import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.handler.BodyHandler;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -54,6 +55,7 @@ public final class ApiRoutes {
         this.router.get("/api/v1/players/count").handler(this::getPlayerCount);
         this.router.get("/api/v1/servers/:id").handler(this::getServer);
         this.router.get("/api/v1/groups").handler(this::getGroups);
+        this.router.get("/api/v1/groups/:name").handler(this::getGroup);
         this.router.get("/api/v1/scaling").handler(this::getScaling);
         this.router.get("/api/v1/metrics").handler(this::getMetrics);
         this.router.get("/api/v1/utilization").handler(this::getUtilization);
@@ -69,10 +71,10 @@ public final class ApiRoutes {
     private void getStatus(RoutingContext context) {
         AtlasBase atlasBase = AtlasBase.getInstance();
         
-        JsonObject status = new JsonObject()
-            .put("running", atlasBase.isRunning())
-            .put("debugMode", atlasBase.isDebugMode())
-            .put("uptime", System.currentTimeMillis());
+        Map<String, Object> status = new HashMap<>();
+        status.put("running", atlasBase.isRunning());
+        status.put("debugMode", atlasBase.isDebugMode());
+        status.put("uptime", System.currentTimeMillis());
 
         this.sendResponse(context, ApiResponse.success(status));
     }
@@ -167,97 +169,127 @@ public final class ApiRoutes {
 
     private void getGroups(RoutingContext context) {
         Set<Scaler> scalers = AtlasBase.getInstance().getScalerManager().getScalers();
-        ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
         
-        List<CompletableFuture<JsonObject>> groupFutures = new ArrayList<>();
+        List<Map<String, Object>> groups = new ArrayList<>();
         
         for (Scaler scaler : scalers) {
             ScalerConfig.Group groupConfig = scaler.getScalerConfig().getGroup();
-            CompletableFuture<JsonObject> groupFuture = provider.getServersByGroup(groupConfig.getName())
-                .thenApply(servers -> {
-                    int onlineServers = (int) servers.stream()
-                        .filter(server -> server.getServerInfo() != null && 
-                                server.getServerInfo().getStatus() == ServerStatus.RUNNING)
-                        .count();
-                    
-                    int totalPlayers = servers.stream()
-                        .filter(server -> server.getServerInfo() != null)
-                        .mapToInt(server -> server.getServerInfo().getOnlinePlayers())
-                        .sum();
-                    
-                    int totalCapacity = servers.stream()
-                        .filter(server -> server.getServerInfo() != null && 
-                                server.getServerInfo().getStatus() == ServerStatus.RUNNING)
-                        .mapToInt(server -> server.getServerInfo().getMaxPlayers())
-                        .sum();
-                    
-                    JsonObject groupJson = new JsonObject()
-                        .put("name", groupConfig.getName())
-                        .put("displayName", groupConfig.getDisplayName())
-                        .put("priority", groupConfig.getPriority())
-                        .put("type", groupConfig.getServer().getType())
-                        .put("scalerType", scaler.getClass().getSimpleName())
-                        .put("minServers", groupConfig.getServer().getMinServers())
-                        .put("maxServers", groupConfig.getServer().getMaxServers())
-                        .put("currentServers", servers.size())
-                        .put("onlineServers", onlineServers)
-                        .put("totalPlayers", totalPlayers)
-                        .put("totalCapacity", totalCapacity)
-                        .put("templates", groupConfig.getTemplates());
-                    
-                    if (groupConfig.getScaling() != null && groupConfig.getScaling().getConditions() != null) {
-                        JsonObject scalingConditions = new JsonObject()
-                            .put("type", groupConfig.getScaling().getType())
-                            .put("scaleUpThreshold", groupConfig.getScaling().getConditions().getScaleUpThreshold())
-                            .put("scaleDownThreshold", groupConfig.getScaling().getConditions().getScaleDownThreshold());
-                        groupJson.put("scaling", scalingConditions);
-                    }
-                    
-                    return groupJson;
-                })
-                .exceptionally(throwable -> {
-                    Logger.error("Failed to get servers for group " + groupConfig.getName(), throwable);
-                    return new JsonObject()
-                        .put("name", groupConfig.getName())
-                        .put("displayName", groupConfig.getDisplayName())
-                        .put("priority", groupConfig.getPriority())
-                        .put("type", groupConfig.getServer().getType())
-                        .put("scalerType", scaler.getClass().getSimpleName())
-                        .put("minServers", groupConfig.getServer().getMinServers())
-                        .put("maxServers", groupConfig.getServer().getMaxServers())
-                        .put("currentServers", 0)
-                        .put("onlineServers", 0)
-                        .put("totalPlayers", 0)
-                        .put("totalCapacity", 0)
-                        .put("templates", groupConfig.getTemplates());
-                });
+            List<AtlasServer> servers = scaler.getServers();
             
-            groupFutures.add(groupFuture);
+            int onlineServers = (int) servers.stream()
+                .filter(server -> server.getServerInfo() != null && 
+                        server.getServerInfo().getStatus() == ServerStatus.RUNNING)
+                .count();
+            
+            int totalPlayers = servers.stream()
+                .filter(server -> server.getServerInfo() != null)
+                .mapToInt(server -> server.getServerInfo().getOnlinePlayers())
+                .sum();
+            
+            int totalCapacity = servers.stream()
+                .filter(server -> server.getServerInfo() != null && 
+                        server.getServerInfo().getStatus() == ServerStatus.RUNNING)
+                .mapToInt(server -> server.getServerInfo().getMaxPlayers())
+                .sum();
+            
+            Map<String, Object> groupMap = new HashMap<>();
+            groupMap.put("name", groupConfig.getName());
+            groupMap.put("displayName", groupConfig.getDisplayName());
+            groupMap.put("priority", groupConfig.getPriority());
+            groupMap.put("type", groupConfig.getServer().getType());
+            groupMap.put("scalerType", scaler.getClass().getSimpleName());
+            groupMap.put("minServers", groupConfig.getServer().getMinServers());
+            groupMap.put("maxServers", groupConfig.getServer().getMaxServers());
+            groupMap.put("currentServers", servers.size());
+            groupMap.put("onlineServers", onlineServers);
+            groupMap.put("totalPlayers", totalPlayers);
+            groupMap.put("totalCapacity", totalCapacity);
+            groupMap.put("templates", groupConfig.getTemplates());
+            
+            if (groupConfig.getScaling() != null && groupConfig.getScaling().getConditions() != null) {
+                Map<String, Object> scalingMap = new HashMap<>();
+                scalingMap.put("type", groupConfig.getScaling().getType());
+                scalingMap.put("scaleUpThreshold", groupConfig.getScaling().getConditions().getScaleUpThreshold());
+                scalingMap.put("scaleDownThreshold", groupConfig.getScaling().getConditions().getScaleDownThreshold());
+                groupMap.put("scaling", scalingMap);
+            }
+            
+            groups.add(groupMap);
         }
         
-        CompletableFuture.allOf(groupFutures.toArray(new CompletableFuture[0]))
-            .thenRun(() -> {
-                List<JsonObject> groups = groupFutures.stream()
-                    .map(CompletableFuture::join)
-                    .sorted((a, b) -> Integer.compare(b.getInteger("priority"), a.getInteger("priority")))
-                    .collect(Collectors.toList());
-                
-                this.sendResponse(context, ApiResponse.success(groups));
-            })
-            .exceptionally(throwable -> {
-                this.sendError(context, "Failed to get groups: " + throwable.getMessage());
-                return null;
-            });
+        List<Map<String, Object>> sortedGroups = groups.stream()
+            .sorted((a, b) -> Integer.compare((Integer) b.get("priority"), (Integer) a.get("priority")))
+            .collect(Collectors.toList());
+        
+        this.sendResponse(context, ApiResponse.success(sortedGroups));
+    }
+
+    private void getGroup(RoutingContext context) {
+        String groupName = context.pathParam("name");
+        Set<Scaler> scalers = AtlasBase.getInstance().getScalerManager().getScalers();
+        
+        Scaler scaler = scalers.stream()
+            .filter(s -> s.getGroupName().equals(groupName))
+            .findFirst()
+            .orElse(null);
+        
+        if (scaler == null) {
+            this.sendError(context, "Group not found: " + groupName, 404);
+            return;
+        }
+        
+        ScalerConfig.Group groupConfig = scaler.getScalerConfig().getGroup();
+        List<AtlasServer> servers = scaler.getServers();
+        
+        int onlineServers = (int) servers.stream()
+            .filter(server -> server.getServerInfo() != null && 
+                    server.getServerInfo().getStatus() == ServerStatus.RUNNING)
+            .count();
+        
+        int totalPlayers = servers.stream()
+            .filter(server -> server.getServerInfo() != null)
+            .mapToInt(server -> server.getServerInfo().getOnlinePlayers())
+            .sum();
+        
+        int totalCapacity = servers.stream()
+            .filter(server -> server.getServerInfo() != null && 
+                    server.getServerInfo().getStatus() == ServerStatus.RUNNING)
+            .mapToInt(server -> server.getServerInfo().getMaxPlayers())
+            .sum();
+        
+        Map<String, Object> groupMap = new HashMap<>();
+        groupMap.put("name", groupConfig.getName());
+        groupMap.put("displayName", groupConfig.getDisplayName());
+        groupMap.put("priority", groupConfig.getPriority());
+        groupMap.put("type", groupConfig.getServer().getType());
+        groupMap.put("scalerType", scaler.getClass().getSimpleName());
+        groupMap.put("minServers", groupConfig.getServer().getMinServers());
+        groupMap.put("maxServers", groupConfig.getServer().getMaxServers());
+        groupMap.put("currentServers", servers.size());
+        groupMap.put("onlineServers", onlineServers);
+        groupMap.put("totalPlayers", totalPlayers);
+        groupMap.put("totalCapacity", totalCapacity);
+        groupMap.put("templates", groupConfig.getTemplates());
+        
+        if (groupConfig.getScaling() != null && groupConfig.getScaling().getConditions() != null) {
+            Map<String, Object> scalingMap = new HashMap<>();
+            scalingMap.put("type", groupConfig.getScaling().getType());
+            scalingMap.put("scaleUpThreshold", groupConfig.getScaling().getConditions().getScaleUpThreshold());
+            scalingMap.put("scaleDownThreshold", groupConfig.getScaling().getConditions().getScaleDownThreshold());
+            groupMap.put("scaling", scalingMap);
+        }
+        
+        this.sendResponse(context, ApiResponse.success(groupMap));
     }
 
     private void getScaling(RoutingContext context) {
         Set<Scaler> scalers = AtlasBase.getInstance().getScalerManager().getScalers();
         
-        JsonObject scaling = new JsonObject();
+        Map<String, Object> scaling = new HashMap<>();
         for (Scaler scaler : scalers) {
-            JsonObject scalerInfo = new JsonObject()
-                .put("group", scaler.getScalerConfig().getGroup().getName())
-                .put("type", scaler.getClass().getSimpleName());
+            Map<String, Object> scalerInfo = new HashMap<>();
+            scalerInfo.put("group", scaler.getScalerConfig().getGroup().getName());
+            scalerInfo.put("type", scaler.getClass().getSimpleName());
             scaling.put(scaler.getGroupName(), scalerInfo);
         }
 
@@ -269,13 +301,13 @@ public final class ApiRoutes {
         
         provider.getAllServers()
             .thenAccept(servers -> {
-                JsonObject metrics = new JsonObject()
-                    .put("totalServers", servers.size())
-                    .put("totalPlayers", servers.stream().mapToInt(server -> server.getServerInfo() != null ? server.getServerInfo().getOnlinePlayers() : 0).sum())
-                    .put("serversByStatus", servers.stream()
-                        .collect(Collectors.groupingBy(
-                            server -> server.getServerInfo() != null ? server.getServerInfo().getStatus().toString() : "UNKNOWN",
-                            Collectors.counting())));
+                Map<String, Object> metrics = new HashMap<>();
+                metrics.put("totalServers", servers.size());
+                metrics.put("totalPlayers", servers.stream().mapToInt(server -> server.getServerInfo() != null ? server.getServerInfo().getOnlinePlayers() : 0).sum());
+                metrics.put("serversByStatus", servers.stream()
+                    .collect(Collectors.groupingBy(
+                        server -> server.getServerInfo() != null ? server.getServerInfo().getStatus().toString() : "UNKNOWN",
+                        Collectors.counting())));
 
                 this.sendResponse(context, ApiResponse.success(metrics));
             })
@@ -376,17 +408,17 @@ public final class ApiRoutes {
         
         provider.getAllServers()
             .thenAccept(servers -> {
-                JsonObject count = new JsonObject()
-                    .put("total", servers.size())
-                    .put("byStatus", servers.stream()
-                        .filter(server -> server.getServerInfo() != null)
-                        .collect(Collectors.groupingBy(
-                            server -> server.getServerInfo().getStatus().toString(),
-                            Collectors.counting())))
-                    .put("byGroup", servers.stream()
-                        .collect(Collectors.groupingBy(
-                            AtlasServer::getGroup,
-                            Collectors.counting())));
+                Map<String, Object> count = new HashMap<>();
+                count.put("total", servers.size());
+                count.put("byStatus", servers.stream()
+                    .filter(server -> server.getServerInfo() != null)
+                    .collect(Collectors.groupingBy(
+                        server -> server.getServerInfo().getStatus().toString(),
+                        Collectors.counting())));
+                count.put("byGroup", servers.stream()
+                    .collect(Collectors.groupingBy(
+                        AtlasServer::getGroup,
+                        Collectors.counting())));
                 
                 this.sendResponse(context, ApiResponse.success(count));
             })
@@ -423,12 +455,12 @@ public final class ApiRoutes {
                         server -> server.getServerInfo().getStatus().toString(),
                         Collectors.summingInt(server -> server.getServerInfo().getOnlinePlayers())));
                 
-                JsonObject playerCount = new JsonObject()
-                    .put("total", totalPlayers)
-                    .put("capacity", totalCapacity)
-                    .put("percentage", totalCapacity > 0 ? (double) totalPlayers / totalCapacity * 100 : 0)
-                    .put("byGroup", playersByGroup)
-                    .put("byStatus", playersByStatus);
+                Map<String, Object> playerCount = new HashMap<>();
+                playerCount.put("total", totalPlayers);
+                playerCount.put("capacity", totalCapacity);
+                playerCount.put("percentage", totalCapacity > 0 ? (double) totalPlayers / totalCapacity * 100 : 0);
+                playerCount.put("byGroup", playersByGroup);
+                playerCount.put("byStatus", playersByStatus);
                 
                 this.sendResponse(context, ApiResponse.success(playerCount));
             })
@@ -467,33 +499,41 @@ public final class ApiRoutes {
             long bandwidthUsed = bandwidthStats != null ? (long) bandwidthStats.usedBps : 0;
             double bandwidthPercentage = bandwidthStats != null ? bandwidthStats.getPercentage() : 0.0;
             
-            JsonObject utilization = new JsonObject()
-                .put("cpu", new JsonObject()
-                    .put("cores", availableProcessors)
-                    .put("usage", Double.parseDouble(df.format(cpuLoad)))
-                    .put("formatted", df.format(cpuLoad) + "%"))
-                .put("memory", new JsonObject()
-                    .put("used", usedMemory)
-                    .put("total", totalMemory)
-                    .put("percentage", Double.parseDouble(df.format(memoryPercentage)))
-                    .put("usedFormatted", this.formatBytes(usedMemory))
-                    .put("totalFormatted", this.formatBytes(totalMemory)))
-                .put("disk", new JsonObject()
-                    .put("used", usedDisk)
-                    .put("total", totalDisk)
-                    .put("percentage", Double.parseDouble(df.format(diskPercentage)))
-                    .put("usedFormatted", this.formatBytes(usedDisk))
-                    .put("totalFormatted", this.formatBytes(totalDisk)))
-                .put("bandwidth", new JsonObject()
-                    .put("used", bandwidthUsed)
-                    .put("total", bandwidthCapacity)
-                    .put("percentage", bandwidthPercentage)
-                    .put("receiveRate", bandwidthStats != null ? bandwidthStats.receiveBps : 0)
-                    .put("sendRate", bandwidthStats != null ? bandwidthStats.sendBps : 0)
-                    .put("usedFormatted", this.formatBytes(bandwidthUsed) + "/s")
-                    .put("totalFormatted", this.formatBytes(bandwidthCapacity) + "/s")
-                    .put("receiveFormatted", this.formatBytes(bandwidthStats != null ? (long) bandwidthStats.receiveBps : 0) + "/s")
-                    .put("sendFormatted", this.formatBytes(bandwidthStats != null ? (long) bandwidthStats.sendBps : 0) + "/s"));
+            Map<String, Object> cpuMap = new HashMap<>();
+            cpuMap.put("cores", availableProcessors);
+            cpuMap.put("usage", Double.parseDouble(df.format(cpuLoad)));
+            cpuMap.put("formatted", df.format(cpuLoad) + "%");
+            
+            Map<String, Object> memoryMap = new HashMap<>();
+            memoryMap.put("used", usedMemory);
+            memoryMap.put("total", totalMemory);
+            memoryMap.put("percentage", Double.parseDouble(df.format(memoryPercentage)));
+            memoryMap.put("usedFormatted", this.formatBytes(usedMemory));
+            memoryMap.put("totalFormatted", this.formatBytes(totalMemory));
+            
+            Map<String, Object> diskMap = new HashMap<>();
+            diskMap.put("used", usedDisk);
+            diskMap.put("total", totalDisk);
+            diskMap.put("percentage", Double.parseDouble(df.format(diskPercentage)));
+            diskMap.put("usedFormatted", this.formatBytes(usedDisk));
+            diskMap.put("totalFormatted", this.formatBytes(totalDisk));
+            
+            Map<String, Object> bandwidthMap = new HashMap<>();
+            bandwidthMap.put("used", bandwidthUsed);
+            bandwidthMap.put("total", bandwidthCapacity);
+            bandwidthMap.put("percentage", bandwidthPercentage);
+            bandwidthMap.put("receiveRate", bandwidthStats != null ? bandwidthStats.receiveBps : 0);
+            bandwidthMap.put("sendRate", bandwidthStats != null ? bandwidthStats.sendBps : 0);
+            bandwidthMap.put("usedFormatted", this.formatBytes(bandwidthUsed) + "/s");
+            bandwidthMap.put("totalFormatted", this.formatBytes(bandwidthCapacity) + "/s");
+            bandwidthMap.put("receiveFormatted", this.formatBytes(bandwidthStats != null ? (long) bandwidthStats.receiveBps : 0) + "/s");
+            bandwidthMap.put("sendFormatted", this.formatBytes(bandwidthStats != null ? (long) bandwidthStats.sendBps : 0) + "/s");
+            
+            Map<String, Object> utilization = new HashMap<>();
+            utilization.put("cpu", cpuMap);
+            utilization.put("memory", memoryMap);
+            utilization.put("disk", diskMap);
+            utilization.put("bandwidth", bandwidthMap);
             
             this.sendResponse(context, ApiResponse.success(utilization));
         } catch (Exception e) {
