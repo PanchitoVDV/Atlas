@@ -370,10 +370,10 @@ public final class ApiRoutes {
             if (cpuLoad < 0) cpuLoad = 0;
             int availableProcessors = osBean.getAvailableProcessors();
 
-            long totalMemory = osBean.getTotalMemorySize();
-            long freeMemory = osBean.getFreeMemorySize();
-            long usedMemory = totalMemory - freeMemory;
-            double memoryPercentage = (double) usedMemory / totalMemory * 100;
+            long[] memoryInfo = this.getMemoryInfo();
+            long totalMemory = memoryInfo[0];
+            long usedMemory = memoryInfo[1];
+            double memoryPercentage = totalMemory > 0 ? (double) usedMemory / totalMemory * 100 : 0;
 
             File root = new File("/");
             long totalDisk = root.getTotalSpace();
@@ -430,6 +430,50 @@ public final class ApiRoutes {
         int exp = (int) (Math.log(bytes) / Math.log(1024));
         String pre = "KMGTPE".charAt(exp-1) + "";
         return String.format("%.1f %sB", bytes / Math.pow(1024, exp), pre);
+    }
+    
+    private long[] getMemoryInfo() {
+        try {
+            java.nio.file.Path meminfoPath = java.nio.file.Paths.get("/proc/meminfo");
+            if (!java.nio.file.Files.exists(meminfoPath)) {
+                // Fallback to Java API if /proc/meminfo doesn't exist
+                OperatingSystemMXBean osBean = (OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
+                long totalMemory = osBean.getTotalMemorySize();
+                long freeMemory = osBean.getFreeMemorySize();
+                return new long[]{totalMemory, totalMemory - freeMemory};
+            }
+            
+            java.util.List<String> lines = java.nio.file.Files.readAllLines(meminfoPath);
+            
+            long memTotal = 0;
+            long memFree = 0;
+            long buffers = 0;
+            long cached = 0;
+            
+            for (String line : lines) {
+                if (line.startsWith("MemTotal:")) {
+                    memTotal = Long.parseLong(line.split("\\s+")[1]) * 1024; // Convert KB to bytes
+                } else if (line.startsWith("MemFree:")) {
+                    memFree = Long.parseLong(line.split("\\s+")[1]) * 1024;
+                } else if (line.startsWith("Buffers:")) {
+                    buffers = Long.parseLong(line.split("\\s+")[1]) * 1024;
+                } else if (line.startsWith("Cached:")) {
+                    cached = Long.parseLong(line.split("\\s+")[1]) * 1024;
+                }
+            }
+            
+            // Calculate used memory like free -m does: Total - Free - Buffers - Cached
+            long usedMemory = memTotal - memFree - buffers - cached;
+            
+            return new long[]{memTotal, usedMemory};
+        } catch (Exception e) {
+            Logger.debug("Failed to read /proc/meminfo, falling back to Java API: " + e.getMessage());
+            // Fallback to Java API
+            OperatingSystemMXBean osBean = (OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
+            long totalMemory = osBean.getTotalMemorySize();
+            long freeMemory = osBean.getFreeMemorySize();
+            return new long[]{totalMemory, totalMemory - freeMemory};
+        }
     }
 
     private void scaleGroup(RoutingContext context) {
