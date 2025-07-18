@@ -112,7 +112,7 @@ public final class OpenApiGenerator {
                 .addParametersItem(new Parameter()
                     .name("group")
                     .in("query")
-                    .description("Filter servers by group name")
+                    .description("Filter servers by group name or display name (case-insensitive)")
                     .required(false)
                     .style(Parameter.StyleEnum.FORM)
                     .explode(true)

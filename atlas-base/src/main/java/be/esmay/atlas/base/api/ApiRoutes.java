@@ -85,15 +85,29 @@ public final class ApiRoutes {
         String searchFilter = context.request().getParam("search");
         ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
 
-        CompletableFuture<List<AtlasServer>> serversFuture;
-        if (groupFilter != null) {
-            serversFuture = provider.getServersByGroup(groupFilter);
-        } else {
-            serversFuture = provider.getAllServers();
-        }
-
-        serversFuture
-            .thenAccept(servers -> {
+        provider.getAllServers()
+            .thenAccept(allServers -> {
+                List<AtlasServer> servers = allServers;
+                
+                // Apply group filter if specified
+                if (groupFilter != null && !groupFilter.isEmpty()) {
+                    Set<Scaler> scalers = AtlasBase.getInstance().getScalerManager().getScalers();
+                    Set<String> matchingGroupNames = scalers.stream()
+                        .filter(scaler -> {
+                            ScalerConfig.Group groupConfig = scaler.getScalerConfig().getGroup();
+                            String displayName = groupConfig.getDisplayName();
+                            String name = groupConfig.getName();
+                            
+                            return (displayName != null && displayName.equalsIgnoreCase(groupFilter)) ||
+                                   (name != null && name.equalsIgnoreCase(groupFilter));
+                        })
+                        .map(scaler -> scaler.getScalerConfig().getGroup().getName())
+                        .collect(Collectors.toSet());
+                    
+                    servers = allServers.stream()
+                        .filter(server -> matchingGroupNames.contains(server.getGroup()))
+                        .collect(Collectors.toList());
+                }
                 if (AtlasBase.getInstance().getResourceMetricsManager() != null) {
                     for (AtlasServer server : servers) {
                         ServerResourceMetrics metrics = AtlasBase.getInstance()
