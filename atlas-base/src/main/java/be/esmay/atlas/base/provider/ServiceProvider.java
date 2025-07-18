@@ -2,6 +2,7 @@ package be.esmay.atlas.base.provider;
 
 import be.esmay.atlas.common.models.AtlasServer;
 import be.esmay.atlas.common.models.ServerInfo;
+import be.esmay.atlas.common.models.ServerResourceMetrics;
 import be.esmay.atlas.common.models.ServerStats;
 import be.esmay.atlas.base.config.impl.ScalerConfig;
 import lombok.Data;
@@ -93,6 +94,14 @@ public abstract class ServiceProvider {
      * @return a CompletableFuture containing ServerStats with CPU, memory, disk, and network usage
      */
     public abstract CompletableFuture<ServerStats> getServerStats(String serverId);
+    
+    /**
+     * Retrieves resource metrics for a server.
+     * 
+     * @param serverId the unique identifier of the server
+     * @return a CompletableFuture containing the server resource metrics
+     */
+    public abstract CompletableFuture<Optional<ServerResourceMetrics>> getServerResourceMetrics(String serverId);
     
     /**
      * Retrieves recent log lines from a server.

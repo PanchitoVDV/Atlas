@@ -16,6 +16,7 @@ import be.esmay.atlas.base.utils.Logger;
 import be.esmay.atlas.common.enums.ServerStatus;
 import be.esmay.atlas.common.models.AtlasServer;
 import be.esmay.atlas.common.models.ServerInfo;
+import be.esmay.atlas.common.models.ServerResourceMetrics;
 import be.esmay.atlas.common.models.ServerStats;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
@@ -38,6 +39,7 @@ import com.github.dockerjava.api.model.Statistics;
 import com.github.dockerjava.api.model.Volume;
 import com.github.dockerjava.core.DefaultDockerClientConfig;
 import com.github.dockerjava.core.DockerClientBuilder;
+import com.github.dockerjava.core.InvocationBuilder;
 
 import java.io.Closeable;
 import java.io.File;
@@ -581,6 +583,85 @@ public final class DockerServiceProvider extends ServiceProvider {
             Logger.debug("Updated server status for: {}", updatedServer.getName());
             return true;
         });
+    }
+
+    @Override
+    public CompletableFuture<Optional<ServerResourceMetrics>> getServerResourceMetrics(String serverId) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                String containerId = this.serverContainerIds.get(serverId);
+                if (containerId == null) {
+                    return Optional.empty();
+                }
+
+                InvocationBuilder.AsyncResultCallback<Statistics> callback = new InvocationBuilder.AsyncResultCallback<>();
+                this.dockerClient.statsCmd(containerId).withNoStream(true).exec(callback);
+                Statistics stats = callback.awaitResult();
+                callback.close();
+
+                if (stats == null) {
+                    return Optional.empty();
+                }
+
+                long memoryUsed = stats.getMemoryStats().getUsage();
+                long memoryLimit = stats.getMemoryStats().getLimit();
+                
+                double cpuDelta = stats.getCpuStats().getCpuUsage().getTotalUsage() - 
+                                 stats.getPreCpuStats().getCpuUsage().getTotalUsage();
+                double systemDelta = stats.getCpuStats().getSystemCpuUsage() - 
+                                    stats.getPreCpuStats().getSystemCpuUsage();
+                double cpuUsage = 0.0;
+                if (systemDelta > 0.0 && cpuDelta > 0.0) {
+                    cpuUsage = (cpuDelta / systemDelta) * stats.getCpuStats().getOnlineCpus() * 100.0;
+                }
+
+                // Get disk usage from container directory
+                AtlasServer server = this.servers.get(serverId);
+                long diskUsed = 0;
+                long diskTotal = 0;
+                if (server != null && server.getWorkingDirectory() != null) {
+                    File workingDir = new File(server.getWorkingDirectory());
+                    diskUsed = this.getDirectorySize(workingDir);
+                    diskTotal = workingDir.getTotalSpace();
+                }
+
+                ServerResourceMetrics metrics = ServerResourceMetrics.builder()
+                    .cpuUsage(cpuUsage)
+                    .memoryUsed(memoryUsed)
+                    .memoryTotal(memoryLimit)
+                    .diskUsed(diskUsed)
+                    .diskTotal(diskTotal)
+                    .lastUpdated(System.currentTimeMillis())
+                    .build();
+
+                return Optional.of(metrics);
+            } catch (Exception e) {
+                Logger.debug("Failed to get resource metrics for server " + serverId + ": " + e.getMessage());
+                return Optional.empty();
+            }
+        }, this.executorService);
+    }
+
+    private long getDirectorySize(File directory) {
+        if (!directory.exists() || !directory.isDirectory()) {
+            return 0;
+        }
+        
+        try {
+            return Files.walk(directory.toPath())
+                .filter(path -> Files.isRegularFile(path))
+                .mapToLong(path -> {
+                    try {
+                        return Files.size(path);
+                    } catch (IOException e) {
+                        return 0;
+                    }
+                })
+                .sum();
+        } catch (IOException e) {
+            Logger.debug("Failed to calculate directory size for " + directory.getPath() + ": " + e.getMessage());
+            return 0;
+        }
     }
 
     @Override

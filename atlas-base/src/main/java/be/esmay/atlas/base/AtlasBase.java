@@ -78,10 +78,8 @@ public final class AtlasBase {
                 this.scalerManager.initialize();
                 this.commandManager.initialize();
 
-                if (this.providerManager.getProvider() instanceof be.esmay.atlas.base.provider.impl.DockerServiceProvider dockerProvider) {
-                    this.resourceMetricsManager = new ResourceMetricsManager(dockerProvider.getDockerClient());
-                    this.resourceMetricsManager.start();
-                }
+                this.resourceMetricsManager = new ResourceMetricsManager();
+                this.resourceMetricsManager.start();
 
                 this.networkBandwidthMonitor = new NetworkBandwidthMonitor();
                 this.networkBandwidthMonitor.start();
