@@ -2,6 +2,7 @@ package be.esmay.atlas.base.api;
 
 import be.esmay.atlas.base.AtlasBase;
 import be.esmay.atlas.base.api.dto.ApiResponse;
+import be.esmay.atlas.base.config.impl.ScalerConfig;
 import be.esmay.atlas.base.metrics.NetworkBandwidthMonitor;
 import be.esmay.atlas.base.provider.ServiceProvider;
 import be.esmay.atlas.base.scaler.Scaler;
@@ -166,11 +167,87 @@ public final class ApiRoutes {
 
     private void getGroups(RoutingContext context) {
         Set<Scaler> scalers = AtlasBase.getInstance().getScalerManager().getScalers();
-        List<String> groups = scalers.stream()
-            .map(scaler -> scaler.getScalerConfig().getGroup().getName())
-            .collect(Collectors.toList());
-
-        this.sendResponse(context, ApiResponse.success(groups));
+        ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
+        
+        List<CompletableFuture<JsonObject>> groupFutures = new ArrayList<>();
+        
+        for (Scaler scaler : scalers) {
+            ScalerConfig.Group groupConfig = scaler.getScalerConfig().getGroup();
+            CompletableFuture<JsonObject> groupFuture = provider.getServersByGroup(groupConfig.getName())
+                .thenApply(servers -> {
+                    int onlineServers = (int) servers.stream()
+                        .filter(server -> server.getServerInfo() != null && 
+                                server.getServerInfo().getStatus() == ServerStatus.RUNNING)
+                        .count();
+                    
+                    int totalPlayers = servers.stream()
+                        .filter(server -> server.getServerInfo() != null)
+                        .mapToInt(server -> server.getServerInfo().getOnlinePlayers())
+                        .sum();
+                    
+                    int totalCapacity = servers.stream()
+                        .filter(server -> server.getServerInfo() != null && 
+                                server.getServerInfo().getStatus() == ServerStatus.RUNNING)
+                        .mapToInt(server -> server.getServerInfo().getMaxPlayers())
+                        .sum();
+                    
+                    JsonObject groupJson = new JsonObject()
+                        .put("name", groupConfig.getName())
+                        .put("displayName", groupConfig.getDisplayName())
+                        .put("priority", groupConfig.getPriority())
+                        .put("type", groupConfig.getServer().getType())
+                        .put("scalerType", scaler.getClass().getSimpleName())
+                        .put("minServers", groupConfig.getServer().getMinServers())
+                        .put("maxServers", groupConfig.getServer().getMaxServers())
+                        .put("currentServers", servers.size())
+                        .put("onlineServers", onlineServers)
+                        .put("totalPlayers", totalPlayers)
+                        .put("totalCapacity", totalCapacity)
+                        .put("templates", groupConfig.getTemplates());
+                    
+                    if (groupConfig.getScaling() != null && groupConfig.getScaling().getConditions() != null) {
+                        JsonObject scalingConditions = new JsonObject()
+                            .put("type", groupConfig.getScaling().getType())
+                            .put("scaleUpThreshold", groupConfig.getScaling().getConditions().getScaleUpThreshold())
+                            .put("scaleDownThreshold", groupConfig.getScaling().getConditions().getScaleDownThreshold());
+                        groupJson.put("scaling", scalingConditions);
+                    }
+                    
+                    return groupJson;
+                })
+                .exceptionally(throwable -> {
+                    Logger.error("Failed to get servers for group " + groupConfig.getName(), throwable);
+                    return new JsonObject()
+                        .put("name", groupConfig.getName())
+                        .put("displayName", groupConfig.getDisplayName())
+                        .put("priority", groupConfig.getPriority())
+                        .put("type", groupConfig.getServer().getType())
+                        .put("scalerType", scaler.getClass().getSimpleName())
+                        .put("minServers", groupConfig.getServer().getMinServers())
+                        .put("maxServers", groupConfig.getServer().getMaxServers())
+                        .put("currentServers", 0)
+                        .put("onlineServers", 0)
+                        .put("totalPlayers", 0)
+                        .put("totalCapacity", 0)
+                        .put("templates", groupConfig.getTemplates());
+                });
+            
+            groupFutures.add(groupFuture);
+        }
+        
+        CompletableFuture.allOf(groupFutures.toArray(new CompletableFuture[0]))
+            .thenRun(() -> {
+                List<JsonObject> groups = groupFutures.stream()
+                    .map(CompletableFuture::join)
+                    .sorted((a, b) -> Integer.compare(b.getInteger("priority"), a.getInteger("priority")))
+                    .collect(Collectors.toList());
+                
+                this.sendResponse(context, ApiResponse.success(groups));
+            })
+            .exceptionally(throwable -> {
+                this.sendError(context, "Failed to get groups: " + throwable.getMessage());
+                return null;
+            });
     }
 
     private void getScaling(RoutingContext context) {
