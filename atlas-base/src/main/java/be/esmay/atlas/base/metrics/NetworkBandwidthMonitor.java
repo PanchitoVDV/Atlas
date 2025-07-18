@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class NetworkBandwidthMonitor {
     
     private static final String PROC_NET_DEV = "/proc/net/dev";
-    private static final long POLL_INTERVAL_MS = 1000; // 1 second
+    private static final long POLL_INTERVAL_MS = 1000;
     
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     private final ConcurrentHashMap<String, NetworkStats> previousStats = new ConcurrentHashMap<>();
@@ -28,7 +28,7 @@ public final class NetworkBandwidthMonitor {
     
     private volatile double currentReceiveBandwidth = 0.0;
     private volatile double currentSendBandwidth = 0.0;
-    private volatile long maxBandwidthBps = 10L * 1024 * 1024 * 1024; // Default 10 Gbps
+    private volatile long maxBandwidthBps = 10L * 1024 * 1024 * 1024;
     
     public void start() {
         this.detectNetworkSpeed();
@@ -74,8 +74,7 @@ public final class NetworkBandwidthMonitor {
                         String[] parts = line.trim().split("\\s+");
                         if (parts.length >= 10) {
                             String iface = parts[0].replace(":", "");
-                            
-                            // Skip loopback and virtual interfaces
+
                             if (iface.equals("lo") || iface.startsWith("veth") || 
                                 iface.startsWith("br-") || iface.startsWith("docker")) {
                                 continue;
@@ -100,8 +99,7 @@ public final class NetworkBandwidthMonitor {
                     }
                 }
             }
-            
-            // Calculate bandwidth in bytes per second
+
             this.currentReceiveBandwidth = totalRxBytes / timeDeltaSec;
             this.currentSendBandwidth = totalTxBytes / timeDeltaSec;
             
@@ -115,7 +113,6 @@ public final class NetworkBandwidthMonitor {
     
     private void detectNetworkSpeed() {
         try {
-            // Try to detect network speed from ethtool or system info
             Path sysClassNet = Paths.get("/sys/class/net");
             if (Files.exists(sysClassNet)) {
                 Files.list(sysClassNet).forEach(ifacePath -> {
@@ -136,9 +133,7 @@ public final class NetworkBandwidthMonitor {
                                         Logger.debug("Detected network speed for " + iface + ": " + speedMbps + " Mbps");
                                     }
                                 }
-                            } catch (Exception e) {
-                                // Ignore errors for individual interfaces
-                            }
+                            } catch (Exception ignored) {}
                         }
                     }
                 });

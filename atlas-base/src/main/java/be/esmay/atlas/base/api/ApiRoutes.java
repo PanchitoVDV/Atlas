@@ -2,6 +2,7 @@ package be.esmay.atlas.base.api;
 
 import be.esmay.atlas.base.AtlasBase;
 import be.esmay.atlas.base.api.dto.ApiResponse;
+import be.esmay.atlas.base.metrics.NetworkBandwidthMonitor;
 import be.esmay.atlas.base.provider.ServiceProvider;
 import be.esmay.atlas.base.scaler.Scaler;
 import be.esmay.atlas.base.utils.Logger;
@@ -90,7 +91,6 @@ public final class ApiRoutes {
 
         serversFuture
             .thenAccept(servers -> {
-                // Update resource metrics if available
                 if (AtlasBase.getInstance().getResourceMetricsManager() != null) {
                     for (AtlasServer server : servers) {
                         ServerResourceMetrics metrics = AtlasBase.getInstance()
@@ -143,8 +143,7 @@ public final class ApiRoutes {
             .thenAccept(serverOpt -> {
                 if (serverOpt.isPresent()) {
                     AtlasServer server = serverOpt.get();
-                    
-                    // Update resource metrics if available
+
                     if (AtlasBase.getInstance().getResourceMetricsManager() != null) {
                         ServerResourceMetrics metrics = AtlasBase.getInstance()
                             .getResourceMetricsManager()
@@ -365,29 +364,24 @@ public final class ApiRoutes {
     private void getUtilization(RoutingContext context) {
         try {
             OperatingSystemMXBean osBean = (OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
-            Runtime runtime = Runtime.getRuntime();
             DecimalFormat df = new DecimalFormat("#.##");
-            
-            // CPU information
+
             double cpuLoad = osBean.getCpuLoad() * 100;
-            if (cpuLoad < 0) cpuLoad = 0; // Sometimes returns -1 if not available
+            if (cpuLoad < 0) cpuLoad = 0;
             int availableProcessors = osBean.getAvailableProcessors();
-            
-            // Memory information
+
             long totalMemory = osBean.getTotalMemorySize();
             long freeMemory = osBean.getFreeMemorySize();
             long usedMemory = totalMemory - freeMemory;
             double memoryPercentage = (double) usedMemory / totalMemory * 100;
-            
-            // Disk information
+
             File root = new File("/");
             long totalDisk = root.getTotalSpace();
             long freeDisk = root.getFreeSpace();
             long usedDisk = totalDisk - freeDisk;
             double diskPercentage = (double) usedDisk / totalDisk * 100;
-            
-            // Network bandwidth (real monitoring)
-            be.esmay.atlas.base.metrics.NetworkBandwidthMonitor.BandwidthStats bandwidthStats = null;
+
+            NetworkBandwidthMonitor.BandwidthStats bandwidthStats = null;
             if (AtlasBase.getInstance().getNetworkBandwidthMonitor() != null) {
                 bandwidthStats = AtlasBase.getInstance().getNetworkBandwidthMonitor().getCurrentStats();
             }
