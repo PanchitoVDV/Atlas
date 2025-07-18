@@ -229,7 +229,14 @@ public final class ApiRoutes {
         Set<Scaler> scalers = AtlasBase.getInstance().getScalerManager().getScalers();
         
         Scaler scaler = scalers.stream()
-            .filter(s -> s.getGroupName().equals(groupName))
+            .filter(s -> {
+                ScalerConfig.Group groupConfig = s.getScalerConfig().getGroup();
+                String displayName = groupConfig.getDisplayName();
+                String name = groupConfig.getName();
+                
+                return (displayName != null && displayName.equalsIgnoreCase(groupName)) ||
+                       (name != null && name.equalsIgnoreCase(groupName));
+            })
             .findFirst()
             .orElse(null);
         
