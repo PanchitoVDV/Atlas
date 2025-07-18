@@ -21,6 +21,12 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
+import be.esmay.atlas.common.enums.ServerStatus;
+import be.esmay.atlas.common.models.ServerResourceMetrics;
+import java.lang.management.ManagementFactory;
+import com.sun.management.OperatingSystemMXBean;
+import java.io.File;
+import java.text.DecimalFormat;
 
 public final class ApiRoutes {
 
@@ -42,10 +48,13 @@ public final class ApiRoutes {
 
         this.router.get("/api/v1/status").handler(this::getStatus);
         this.router.get("/api/v1/servers").handler(this::getServers);
+        this.router.get("/api/v1/servers/count").handler(this::getServerCount);
+        this.router.get("/api/v1/players/count").handler(this::getPlayerCount);
         this.router.get("/api/v1/servers/:id").handler(this::getServer);
         this.router.get("/api/v1/groups").handler(this::getGroups);
         this.router.get("/api/v1/scaling").handler(this::getScaling);
         this.router.get("/api/v1/metrics").handler(this::getMetrics);
+        this.router.get("/api/v1/utilization").handler(this::getUtilization);
 
         this.router.post("/api/v1/servers").handler(this::createServers);
         this.router.post("/api/v1/servers/:id/start").handler(this::startServer);
@@ -67,24 +76,63 @@ public final class ApiRoutes {
     }
 
     private void getServers(RoutingContext context) {
-        String group = context.request().getParam("group");
+        String groupFilter = context.request().getParam("group");
+        String statusFilter = context.request().getParam("status");
+        String searchFilter = context.request().getParam("search");
         ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
 
-        if (group != null) {
-            provider.getServersByGroup(group)
-                .thenAccept(servers -> this.sendResponse(context, ApiResponse.success(servers)))
-                .exceptionally(throwable -> {
-                    this.sendError(context, "Failed to get servers: " + throwable.getMessage());
-                    return null;
-                });
+        CompletableFuture<List<AtlasServer>> serversFuture;
+        if (groupFilter != null) {
+            serversFuture = provider.getServersByGroup(groupFilter);
         } else {
-            provider.getAllServers()
-                .thenAccept(servers -> this.sendResponse(context, ApiResponse.success(servers)))
-                .exceptionally(throwable -> {
-                    this.sendError(context, "Failed to get servers: " + throwable.getMessage());
-                    return null;
-                });
+            serversFuture = provider.getAllServers();
         }
+
+        serversFuture
+            .thenAccept(servers -> {
+                // Update resource metrics if available
+                if (AtlasBase.getInstance().getResourceMetricsManager() != null) {
+                    for (AtlasServer server : servers) {
+                        ServerResourceMetrics metrics = AtlasBase.getInstance()
+                            .getResourceMetricsManager()
+                            .getMetrics(server.getServerId());
+                        if (metrics != null) {
+                            server.updateResourceMetrics(metrics);
+                        }
+                    }
+                }
+                
+                List<AtlasServer> filteredServers = servers.stream()
+                    .filter(server -> {
+                        if (statusFilter != null && !statusFilter.isEmpty()) {
+                            ServerStatus requestedStatus;
+                            try {
+                                requestedStatus = ServerStatus.valueOf(statusFilter.toUpperCase());
+                            } catch (IllegalArgumentException e) {
+                                return false;
+                            }
+                            return server.getServerInfo() != null && 
+                                   server.getServerInfo().getStatus() == requestedStatus;
+                        }
+                        return true;
+                    })
+                    .filter(server -> {
+                        if (searchFilter != null && !searchFilter.isEmpty()) {
+                            String search = searchFilter.toLowerCase();
+                            return server.getName().toLowerCase().contains(search) ||
+                                   server.getServerId().toLowerCase().contains(search) ||
+                                   server.getGroup().toLowerCase().contains(search);
+                        }
+                        return true;
+                    })
+                    .collect(Collectors.toList());
+                
+                this.sendResponse(context, ApiResponse.success(filteredServers));
+            })
+            .exceptionally(throwable -> {
+                this.sendError(context, "Failed to get servers: " + throwable.getMessage());
+                return null;
+            });
     }
 
     private void getServer(RoutingContext context) {
@@ -94,7 +142,19 @@ public final class ApiRoutes {
         provider.getServer(serverId)
             .thenAccept(serverOpt -> {
                 if (serverOpt.isPresent()) {
-                    this.sendResponse(context, ApiResponse.success(serverOpt.get()));
+                    AtlasServer server = serverOpt.get();
+                    
+                    // Update resource metrics if available
+                    if (AtlasBase.getInstance().getResourceMetricsManager() != null) {
+                        ServerResourceMetrics metrics = AtlasBase.getInstance()
+                            .getResourceMetricsManager()
+                            .getMetrics(server.getServerId());
+                        if (metrics != null) {
+                            server.updateResourceMetrics(metrics);
+                        }
+                    }
+                    
+                    this.sendResponse(context, ApiResponse.success(server));
                 } else {
                     this.sendError(context, "Server not found: " + serverId, 404);
                 }
@@ -233,6 +293,149 @@ public final class ApiRoutes {
                 this.sendError(context, "Failed to execute command: " + throwable.getMessage());
                 return null;
             });
+    }
+
+    private void getServerCount(RoutingContext context) {
+        ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
+        
+        provider.getAllServers()
+            .thenAccept(servers -> {
+                JsonObject count = new JsonObject()
+                    .put("total", servers.size())
+                    .put("byStatus", servers.stream()
+                        .filter(server -> server.getServerInfo() != null)
+                        .collect(Collectors.groupingBy(
+                            server -> server.getServerInfo().getStatus().toString(),
+                            Collectors.counting())))
+                    .put("byGroup", servers.stream()
+                        .collect(Collectors.groupingBy(
+                            AtlasServer::getGroup,
+                            Collectors.counting())));
+                
+                this.sendResponse(context, ApiResponse.success(count));
+            })
+            .exceptionally(throwable -> {
+                this.sendError(context, "Failed to get server count: " + throwable.getMessage());
+                return null;
+            });
+    }
+
+    private void getPlayerCount(RoutingContext context) {
+        ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
+        
+        provider.getAllServers()
+            .thenAccept(servers -> {
+                int totalPlayers = servers.stream()
+                    .filter(server -> server.getServerInfo() != null)
+                    .mapToInt(server -> server.getServerInfo().getOnlinePlayers())
+                    .sum();
+                
+                int totalCapacity = servers.stream()
+                    .filter(server -> server.getServerInfo() != null)
+                    .mapToInt(server -> server.getServerInfo().getMaxPlayers())
+                    .sum();
+                
+                Map<String, Integer> playersByGroup = servers.stream()
+                    .filter(server -> server.getServerInfo() != null)
+                    .collect(Collectors.groupingBy(
+                        AtlasServer::getGroup,
+                        Collectors.summingInt(server -> server.getServerInfo().getOnlinePlayers())));
+                
+                Map<String, Integer> playersByStatus = servers.stream()
+                    .filter(server -> server.getServerInfo() != null)
+                    .collect(Collectors.groupingBy(
+                        server -> server.getServerInfo().getStatus().toString(),
+                        Collectors.summingInt(server -> server.getServerInfo().getOnlinePlayers())));
+                
+                JsonObject playerCount = new JsonObject()
+                    .put("total", totalPlayers)
+                    .put("capacity", totalCapacity)
+                    .put("percentage", totalCapacity > 0 ? (double) totalPlayers / totalCapacity * 100 : 0)
+                    .put("byGroup", playersByGroup)
+                    .put("byStatus", playersByStatus);
+                
+                this.sendResponse(context, ApiResponse.success(playerCount));
+            })
+            .exceptionally(throwable -> {
+                this.sendError(context, "Failed to get player count: " + throwable.getMessage());
+                return null;
+            });
+    }
+
+    private void getUtilization(RoutingContext context) {
+        try {
+            OperatingSystemMXBean osBean = (OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
+            Runtime runtime = Runtime.getRuntime();
+            DecimalFormat df = new DecimalFormat("#.##");
+            
+            // CPU information
+            double cpuLoad = osBean.getCpuLoad() * 100;
+            if (cpuLoad < 0) cpuLoad = 0; // Sometimes returns -1 if not available
+            int availableProcessors = osBean.getAvailableProcessors();
+            
+            // Memory information
+            long totalMemory = osBean.getTotalMemorySize();
+            long freeMemory = osBean.getFreeMemorySize();
+            long usedMemory = totalMemory - freeMemory;
+            double memoryPercentage = (double) usedMemory / totalMemory * 100;
+            
+            // Disk information
+            File root = new File("/");
+            long totalDisk = root.getTotalSpace();
+            long freeDisk = root.getFreeSpace();
+            long usedDisk = totalDisk - freeDisk;
+            double diskPercentage = (double) usedDisk / totalDisk * 100;
+            
+            // Network bandwidth (real monitoring)
+            be.esmay.atlas.base.metrics.NetworkBandwidthMonitor.BandwidthStats bandwidthStats = null;
+            if (AtlasBase.getInstance().getNetworkBandwidthMonitor() != null) {
+                bandwidthStats = AtlasBase.getInstance().getNetworkBandwidthMonitor().getCurrentStats();
+            }
+            
+            long bandwidthCapacity = bandwidthStats != null ? bandwidthStats.maxBps : 1024 * 1024 * 1024; // 1 Gbps default
+            long bandwidthUsed = bandwidthStats != null ? (long) bandwidthStats.usedBps : 0;
+            double bandwidthPercentage = bandwidthStats != null ? bandwidthStats.getPercentage() : 0.0;
+            
+            JsonObject utilization = new JsonObject()
+                .put("cpu", new JsonObject()
+                    .put("cores", availableProcessors)
+                    .put("usage", Double.parseDouble(df.format(cpuLoad)))
+                    .put("formatted", df.format(cpuLoad) + "%"))
+                .put("memory", new JsonObject()
+                    .put("used", usedMemory)
+                    .put("total", totalMemory)
+                    .put("percentage", Double.parseDouble(df.format(memoryPercentage)))
+                    .put("usedFormatted", this.formatBytes(usedMemory))
+                    .put("totalFormatted", this.formatBytes(totalMemory)))
+                .put("disk", new JsonObject()
+                    .put("used", usedDisk)
+                    .put("total", totalDisk)
+                    .put("percentage", Double.parseDouble(df.format(diskPercentage)))
+                    .put("usedFormatted", this.formatBytes(usedDisk))
+                    .put("totalFormatted", this.formatBytes(totalDisk)))
+                .put("bandwidth", new JsonObject()
+                    .put("used", bandwidthUsed)
+                    .put("total", bandwidthCapacity)
+                    .put("percentage", bandwidthPercentage)
+                    .put("receiveRate", bandwidthStats != null ? bandwidthStats.receiveBps : 0)
+                    .put("sendRate", bandwidthStats != null ? bandwidthStats.sendBps : 0)
+                    .put("usedFormatted", this.formatBytes(bandwidthUsed) + "/s")
+                    .put("totalFormatted", this.formatBytes(bandwidthCapacity) + "/s")
+                    .put("receiveFormatted", this.formatBytes(bandwidthStats != null ? (long) bandwidthStats.receiveBps : 0) + "/s")
+                    .put("sendFormatted", this.formatBytes(bandwidthStats != null ? (long) bandwidthStats.sendBps : 0) + "/s"));
+            
+            this.sendResponse(context, ApiResponse.success(utilization));
+        } catch (Exception e) {
+            Logger.error("Failed to get system utilization", e);
+            this.sendError(context, "Failed to get system utilization: " + e.getMessage());
+        }
+    }
+    
+    private String formatBytes(long bytes) {
+        if (bytes < 1024) return bytes + " B";
+        int exp = (int) (Math.log(bytes) / Math.log(1024));
+        String pre = "KMGTPE".charAt(exp-1) + "";
+        return String.format("%.1f %sB", bytes / Math.pow(1024, exp), pre);
     }
 
     private void scaleGroup(RoutingContext context) {

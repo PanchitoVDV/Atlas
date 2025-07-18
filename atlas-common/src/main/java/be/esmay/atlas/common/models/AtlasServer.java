@@ -24,6 +24,7 @@ public final class AtlasServer {
     private volatile boolean shutdown;
 
     private ServerInfo serverInfo;
+    private ServerResourceMetrics resourceMetrics;
 
     public void updateServerInfo(ServerInfo serverInfo) {
         this.serverInfo = serverInfo;
@@ -31,6 +32,15 @@ public final class AtlasServer {
 
     public AtlasServer withServerInfo(ServerInfo serverInfo) {
         this.serverInfo = serverInfo;
+        return this;
+    }
+    
+    public void updateResourceMetrics(ServerResourceMetrics resourceMetrics) {
+        this.resourceMetrics = resourceMetrics;
+    }
+    
+    public AtlasServer withResourceMetrics(ServerResourceMetrics resourceMetrics) {
+        this.resourceMetrics = resourceMetrics;
         return this;
     }
 }

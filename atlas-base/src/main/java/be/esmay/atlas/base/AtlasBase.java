@@ -4,6 +4,8 @@ import be.esmay.atlas.base.api.ApiManager;
 import be.esmay.atlas.base.commands.CommandManager;
 import be.esmay.atlas.base.config.ConfigManager;
 import be.esmay.atlas.base.lifecycle.ServerLifecycleManager;
+import be.esmay.atlas.base.metrics.NetworkBandwidthMonitor;
+import be.esmay.atlas.base.metrics.ResourceMetricsManager;
 import be.esmay.atlas.base.network.NettyServer;
 import be.esmay.atlas.base.provider.ProviderManager;
 import be.esmay.atlas.base.scaler.ScalerManager;
@@ -33,6 +35,8 @@ public final class AtlasBase {
     private final CommandManager commandManager;
     private final ServerManager serverManager;
     private final ApiManager apiManager;
+    private ResourceMetricsManager resourceMetricsManager;
+    private NetworkBandwidthMonitor networkBandwidthMonitor;
 
     private NettyServer nettyServer;
 
@@ -73,6 +77,17 @@ public final class AtlasBase {
                 this.providerManager.initialize(this.configManager.getAtlasConfig());
                 this.scalerManager.initialize();
                 this.commandManager.initialize();
+                
+                // Initialize ResourceMetricsManager if using Docker provider
+                if (this.providerManager.getProvider() instanceof be.esmay.atlas.base.provider.impl.DockerServiceProvider dockerProvider) {
+                    this.resourceMetricsManager = new ResourceMetricsManager(dockerProvider.getDockerClient());
+                    this.resourceMetricsManager.start();
+                }
+                
+                // Initialize NetworkBandwidthMonitor
+                this.networkBandwidthMonitor = new NetworkBandwidthMonitor();
+                this.networkBandwidthMonitor.start();
+                
                 this.apiManager.start();
                 this.nettyServer.start();
 
@@ -111,6 +126,12 @@ public final class AtlasBase {
                 if (this.commandManager != null)
                     this.commandManager.shutdown();
 
+                if (this.networkBandwidthMonitor != null)
+                    this.networkBandwidthMonitor.stop();
+                    
+                if (this.resourceMetricsManager != null)
+                    this.resourceMetricsManager.stop();
+                    
                 if (this.providerManager != null)
                     this.providerManager.shutdown();
 

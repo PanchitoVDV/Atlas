@@ -1114,6 +1114,10 @@ public final class DockerServiceProvider extends ServiceProvider {
 
         return 0.0;
     }
+    
+    public DockerClient getDockerClient() {
+        return this.dockerClient;
+    }
 
     @Override
     public void shutdown() {

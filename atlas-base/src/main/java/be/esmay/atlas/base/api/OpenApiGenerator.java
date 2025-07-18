@@ -68,6 +68,8 @@ public final class OpenApiGenerator {
         
         paths.addPathItem("/api/v1/status", createStatusPath());
         paths.addPathItem("/api/v1/servers", createServersPath());
+        paths.addPathItem("/api/v1/servers/count", createServerCountPath());
+        paths.addPathItem("/api/v1/players/count", createPlayerCountPath());
         paths.addPathItem("/api/v1/servers/{id}", createServerByIdPath());
         paths.addPathItem("/api/v1/servers/{id}/start", createServerActionPath("start"));
         paths.addPathItem("/api/v1/servers/{id}/stop", createServerActionPath("stop"));
@@ -76,6 +78,7 @@ public final class OpenApiGenerator {
         paths.addPathItem("/api/v1/groups/{group}/scale", createScalePath());
         paths.addPathItem("/api/v1/scaling", createScalingPath());
         paths.addPathItem("/api/v1/metrics", createMetricsPath());
+        paths.addPathItem("/api/v1/utilization", createUtilizationPath());
         paths.addPathItem("/api/v1/servers/{id}/ws", createWebSocketPath());
         
         return paths;
@@ -113,6 +116,22 @@ public final class OpenApiGenerator {
                     .style(Parameter.StyleEnum.FORM)
                     .explode(true)
                     .schema(new StringSchema()))
+                .addParametersItem(new Parameter()
+                    .name("status")
+                    .in("query")
+                    .description("Filter servers by status (STARTING, RUNNING, STOPPING, STOPPED, ERROR)")
+                    .required(false)
+                    .style(Parameter.StyleEnum.FORM)
+                    .explode(true)
+                    .schema(new StringSchema()))
+                .addParametersItem(new Parameter()
+                    .name("search")
+                    .in("query")
+                    .description("Search servers by name, ID, or group")
+                    .required(false)
+                    .style(Parameter.StyleEnum.FORM)
+                    .explode(true)
+                    .schema(new StringSchema()))
                 .responses(createStandardResponses()
                     .addApiResponse("200", new ApiResponse()
                         .description("List of servers")
@@ -137,6 +156,38 @@ public final class OpenApiGenerator {
                         .content(new Content()
                             .addMediaType("application/json", new MediaType()
                                 .schema(new Schema<>().$ref("#/components/schemas/ApiResponse")))))));
+    }
+
+    private static PathItem createServerCountPath() {
+        return new PathItem()
+            .get(new Operation()
+                .operationId("getServerCount")
+                .summary("Get server count")
+                .description("Returns the total number of servers and breakdown by status and group")
+                .addTagsItem("Servers")
+                .addSecurityItem(new SecurityRequirement().addList("bearerAuth"))
+                .responses(createStandardResponses()
+                    .addApiResponse("200", new ApiResponse()
+                        .description("Server count information")
+                        .content(new Content()
+                            .addMediaType("application/json", new MediaType()
+                                .schema(new Schema<>().$ref("#/components/schemas/ServerCountResponse")))))));
+    }
+
+    private static PathItem createPlayerCountPath() {
+        return new PathItem()
+            .get(new Operation()
+                .operationId("getPlayerCount")
+                .summary("Get player count")
+                .description("Returns the total number of players online and breakdown by group and status")
+                .addTagsItem("Players")
+                .addSecurityItem(new SecurityRequirement().addList("bearerAuth"))
+                .responses(createStandardResponses()
+                    .addApiResponse("200", new ApiResponse()
+                        .description("Player count information")
+                        .content(new Content()
+                            .addMediaType("application/json", new MediaType()
+                                .schema(new Schema<>().$ref("#/components/schemas/PlayerCountResponse")))))));
     }
 
     private static PathItem createServerByIdPath() {
@@ -322,6 +373,22 @@ public final class OpenApiGenerator {
                                 .schema(new Schema<>().$ref("#/components/schemas/MetricsResponse")))))));
     }
 
+    private static PathItem createUtilizationPath() {
+        return new PathItem()
+            .get(new Operation()
+                .operationId("getUtilization")
+                .summary("Get system utilization")
+                .description("Returns current system resource utilization including memory, disk, and bandwidth")
+                .addTagsItem("Monitoring")
+                .addSecurityItem(new SecurityRequirement().addList("bearerAuth"))
+                .responses(createStandardResponses()
+                    .addApiResponse("200", new ApiResponse()
+                        .description("System utilization information")
+                        .content(new Content()
+                            .addMediaType("application/json", new MediaType()
+                                .schema(new Schema<>().$ref("#/components/schemas/UtilizationResponse")))))));
+    }
+
     private static PathItem createWebSocketPath() {
         Parameter serverIdParam = new Parameter()
             .name("id")
@@ -490,6 +557,63 @@ public final class OpenApiGenerator {
                     .addProperty("totalServers", new Schema<>().type("integer").example(3))
                     .addProperty("totalPlayers", new Schema<>().type("integer").example(47))
                     .addProperty("serversByStatus", new ObjectSchema().additionalProperties(new Schema<>().type("integer"))))
+                .addProperty("timestamp", new Schema<>().type("integer").format("int64").example(1752700258719L))),
+            
+            Map.entry("ServerCountResponse", new ObjectSchema()
+                .addProperty("status", new StringSchema().example("success"))
+                .addProperty("data", new ObjectSchema()
+                    .addProperty("total", new Schema<>().type("integer").example(10).description("Total number of servers"))
+                    .addProperty("byStatus", new ObjectSchema()
+                        .additionalProperties(new Schema<>().type("integer"))
+                        .description("Server count grouped by status"))
+                    .addProperty("byGroup", new ObjectSchema()
+                        .additionalProperties(new Schema<>().type("integer"))
+                        .description("Server count grouped by group name")))
+                .addProperty("timestamp", new Schema<>().type("integer").format("int64").example(1752700258719L))),
+            
+            Map.entry("PlayerCountResponse", new ObjectSchema()
+                .addProperty("status", new StringSchema().example("success"))
+                .addProperty("data", new ObjectSchema()
+                    .addProperty("total", new Schema<>().type("integer").example(147).description("Total number of players online"))
+                    .addProperty("capacity", new Schema<>().type("integer").example(300).description("Total server capacity"))
+                    .addProperty("percentage", new Schema<>().type("number").format("double").example(49.0).description("Percentage of capacity used"))
+                    .addProperty("byGroup", new ObjectSchema()
+                        .additionalProperties(new Schema<>().type("integer"))
+                        .description("Player count grouped by server group"))
+                    .addProperty("byStatus", new ObjectSchema()
+                        .additionalProperties(new Schema<>().type("integer"))
+                        .description("Player count grouped by server status")))
+                .addProperty("timestamp", new Schema<>().type("integer").format("int64").example(1752700258719L))),
+            
+            Map.entry("UtilizationResponse", new ObjectSchema()
+                .addProperty("status", new StringSchema().example("success"))
+                .addProperty("data", new ObjectSchema()
+                    .addProperty("cpu", new ObjectSchema()
+                        .addProperty("cores", new Schema<>().type("integer").example(8))
+                        .addProperty("usage", new Schema<>().type("number").format("double").example(45.5))
+                        .addProperty("formatted", new StringSchema().example("45.5%")))
+                    .addProperty("memory", new ObjectSchema()
+                        .addProperty("used", new Schema<>().type("integer").format("int64").example(25118949376L))
+                        .addProperty("total", new Schema<>().type("integer").format("int64").example(33961984000L))
+                        .addProperty("percentage", new Schema<>().type("number").format("double").example(74.0))
+                        .addProperty("usedFormatted", new StringSchema().example("23.4 GB"))
+                        .addProperty("totalFormatted", new StringSchema().example("31.6 GB")))
+                    .addProperty("disk", new ObjectSchema()
+                        .addProperty("used", new Schema<>().type("integer").format("int64").example(152465104896L))
+                        .addProperty("total", new Schema<>().type("integer").format("int64").example(338811232256L))
+                        .addProperty("percentage", new Schema<>().type("number").format("double").example(45.0))
+                        .addProperty("usedFormatted", new StringSchema().example("142.0 GB"))
+                        .addProperty("totalFormatted", new StringSchema().example("315.5 GB")))
+                    .addProperty("bandwidth", new ObjectSchema()
+                        .addProperty("used", new Schema<>().type("integer").format("int64").example(6871947674L))
+                        .addProperty("total", new Schema<>().type("integer").format("int64").example(10737418240L))
+                        .addProperty("percentage", new Schema<>().type("number").format("double").example(62.0))
+                        .addProperty("receiveRate", new Schema<>().type("number").format("double").example(1073741824.0))
+                        .addProperty("sendRate", new Schema<>().type("number").format("double").example(536870912.0))
+                        .addProperty("usedFormatted", new StringSchema().example("1.8 GB/s"))
+                        .addProperty("totalFormatted", new StringSchema().example("10.0 GB/s"))
+                        .addProperty("receiveFormatted", new StringSchema().example("1.0 GB/s"))
+                        .addProperty("sendFormatted", new StringSchema().example("512.0 MB/s"))))
                 .addProperty("timestamp", new Schema<>().type("integer").format("int64").example(1752700258719L)))
         );
     }
