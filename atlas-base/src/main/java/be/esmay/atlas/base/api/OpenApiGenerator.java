@@ -22,6 +22,7 @@ import io.swagger.v3.oas.models.security.SecurityRequirement;
 import io.swagger.v3.oas.models.security.SecurityScheme;
 import io.swagger.v3.oas.models.servers.Server;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
@@ -71,6 +72,13 @@ public final class OpenApiGenerator {
         paths.addPathItem("/api/v1/servers/count", createServerCountPath());
         paths.addPathItem("/api/v1/players/count", createPlayerCountPath());
         paths.addPathItem("/api/v1/servers/{id}", createServerByIdPath());
+        paths.addPathItem("/api/v1/servers/{id}/logs", createServerLogsPath());
+        paths.addPathItem("/api/v1/servers/{id}/files", createServerFilesPath());
+        paths.addPathItem("/api/v1/servers/{id}/files/contents", createFileContentsPath());
+        paths.addPathItem("/api/v1/servers/{id}/files/download", createFileDownloadPath());
+        paths.addPathItem("/api/v1/servers/{id}/files/upload", createFileUploadPath());
+        paths.addPathItem("/api/v1/servers/{id}/files/mkdir", createMkdirPath());
+        paths.addPathItem("/api/v1/servers/{id}/files/rename", createFileRenamePath());
         paths.addPathItem("/api/v1/servers/{id}/start", createServerActionPath("start"));
         paths.addPathItem("/api/v1/servers/{id}/stop", createServerActionPath("stop"));
         paths.addPathItem("/api/v1/servers/{id}/command", createServerCommandPath());
@@ -112,7 +120,7 @@ public final class OpenApiGenerator {
                 .addParametersItem(new Parameter()
                     .name("group")
                     .in("query")
-                    .description("Filter servers by group name or display name (case-insensitive)")
+                    .description("Filter servers by group name (case-insensitive)")
                     .required(false)
                     .style(Parameter.StyleEnum.FORM)
                     .explode(true)
@@ -232,6 +240,355 @@ public final class OpenApiGenerator {
                         .description("Server not found"))));
     }
 
+    private static PathItem createServerLogsPath() {
+        Parameter serverIdParam = new Parameter()
+            .name("id")
+            .in("path")
+            .description("Server ID")
+            .required(true)
+            .style(Parameter.StyleEnum.SIMPLE)
+            .explode(false)
+            .schema(new StringSchema());
+
+        Parameter linesParam = new Parameter()
+            .name("lines")
+            .in("query")
+            .description("Number of log lines to retrieve (default: all)")
+            .required(false)
+            .schema(new Schema<Integer>().type("integer").minimum(BigDecimal.valueOf(1)));
+
+        return new PathItem()
+            .get(new Operation()
+                .operationId("getServerLogs")
+                .summary("Get server logs")
+                .description("Returns recent log lines from a specific server")
+                .addTagsItem("Servers")
+                .addParametersItem(serverIdParam)
+                .addParametersItem(linesParam)
+                .responses(createStandardResponses()
+                    .addApiResponse("200", new ApiResponse()
+                        .description("Server logs")
+                        .content(new Content()
+                            .addMediaType("application/json", new MediaType()
+                                .schema(new Schema<>().$ref("#/components/schemas/ServerLogsResponse")))))
+                    .addApiResponse("404", new ApiResponse()
+                        .description("Server not found"))));
+    }
+
+    private static PathItem createServerFilesPath() {
+        Parameter serverIdParam = new Parameter()
+            .name("id")
+            .in("path")
+            .description("Server ID")
+            .required(true)
+            .style(Parameter.StyleEnum.SIMPLE)
+            .explode(false)
+            .schema(new StringSchema());
+
+        Parameter pathParam = new Parameter()
+            .name("path")
+            .in("query")
+            .description("Path within server directory to list (default: /)")
+            .required(false)
+            .schema(new StringSchema().example("/plugins"));
+
+        return new PathItem()
+            .get(new Operation()
+                .operationId("getServerFiles")
+                .summary("List server files")
+                .description("Returns a list of files and directories in the specified path within the server's working directory")
+                .addTagsItem("Servers")
+                .addParametersItem(serverIdParam)
+                .addParametersItem(pathParam)
+                .responses(createStandardResponses()
+                    .addApiResponse("200", new ApiResponse()
+                        .description("Server file listing")
+                        .content(new Content()
+                            .addMediaType("application/json", new MediaType()
+                                .schema(new Schema<>().$ref("#/components/schemas/FileListResponse")))))
+                    .addApiResponse("400", new ApiResponse()
+                        .description("Invalid path or directory traversal attempt"))
+                    .addApiResponse("403", new ApiResponse()
+                        .description("Security violation - path outside server directory"))
+                    .addApiResponse("404", new ApiResponse()
+                        .description("Server not found or path does not exist"))));
+    }
+
+    private static PathItem createFileContentsPath() {
+        Parameter serverIdParam = new Parameter()
+            .name("id")
+            .in("path")
+            .description("Server ID")
+            .required(true)
+            .style(Parameter.StyleEnum.SIMPLE)
+            .explode(false)
+            .schema(new StringSchema());
+
+        Parameter fileParam = new Parameter()
+            .name("file")
+            .in("query")
+            .description("Path to the file within server directory")
+            .required(true)
+            .schema(new StringSchema().example("config/server.properties"));
+
+        return new PathItem()
+            .get(new Operation()
+                .operationId("getFileContents")
+                .summary("Get file contents")
+                .description("Returns the contents of a specific file within the server's working directory")
+                .addTagsItem("Files")
+                .addParametersItem(serverIdParam)
+                .addParametersItem(fileParam)
+                .responses(createStandardResponses()
+                    .addApiResponse("200", new ApiResponse()
+                        .description("File contents")
+                        .content(new Content()
+                            .addMediaType("text/plain", new MediaType()
+                                .schema(new StringSchema()))))
+                    .addApiResponse("400", new ApiResponse()
+                        .description("Missing file parameter or invalid path"))
+                    .addApiResponse("403", new ApiResponse()
+                        .description("Security violation - file outside server directory"))
+                    .addApiResponse("404", new ApiResponse()
+                        .description("Server not found or file does not exist"))))
+            .put(new Operation()
+                .operationId("writeFileContents")
+                .summary("Write file contents")
+                .description("Writes content to a file within the server's working directory. Creates directories if needed. Send the file content as the request body.")
+                .addTagsItem("Files")
+                .addParametersItem(serverIdParam)
+                .addParametersItem(fileParam)
+                .requestBody(new RequestBody()
+                    .description("File content to write (send as request body)")
+                    .required(false)
+                    .content(new Content()
+                        .addMediaType("text/plain", new MediaType()
+                            .schema(new StringSchema()
+                                .example("server.port=25565\ndifficulty=normal\nmax-players=20")))
+                        .addMediaType("application/octet-stream", new MediaType()
+                            .schema(new StringSchema()
+                                .format("binary")
+                                .example("Binary file content")))))
+                .responses(createStandardResponses()
+                    .addApiResponse("200", new ApiResponse()
+                        .description("File written successfully")
+                        .content(new Content()
+                            .addMediaType("application/json", new MediaType()
+                                .schema(new Schema<>().$ref("#/components/schemas/ApiResponse")))))
+                    .addApiResponse("400", new ApiResponse()
+                        .description("Missing file parameter or invalid path"))
+                    .addApiResponse("403", new ApiResponse()
+                        .description("Security violation - file outside server directory"))
+                    .addApiResponse("404", new ApiResponse()
+                        .description("Server not found"))))
+            .delete(new Operation()
+                .operationId("deleteFile")
+                .summary("Delete file")
+                .description("Deletes a file or directory within the server's working directory")
+                .addTagsItem("Files")
+                .addParametersItem(serverIdParam)
+                .addParametersItem(fileParam)
+                .responses(createStandardResponses()
+                    .addApiResponse("200", new ApiResponse()
+                        .description("File deleted successfully")
+                        .content(new Content()
+                            .addMediaType("application/json", new MediaType()
+                                .schema(new Schema<>().$ref("#/components/schemas/ApiResponse")))))
+                    .addApiResponse("400", new ApiResponse()
+                        .description("Missing file parameter or invalid path"))
+                    .addApiResponse("403", new ApiResponse()
+                        .description("Security violation - file outside server directory"))
+                    .addApiResponse("404", new ApiResponse()
+                        .description("Server not found or file does not exist"))));
+    }
+
+    private static PathItem createFileDownloadPath() {
+        Parameter serverIdParam = new Parameter()
+            .name("id")
+            .in("path")
+            .description("Server ID")
+            .required(true)
+            .style(Parameter.StyleEnum.SIMPLE)
+            .explode(false)
+            .schema(new StringSchema());
+
+        Parameter fileParam = new Parameter()
+            .name("file")
+            .in("query")
+            .description("Path to the file within server directory to download")
+            .required(true)
+            .schema(new StringSchema().example("world/level.dat"));
+
+        return new PathItem()
+            .get(new Operation()
+                .operationId("downloadFile")
+                .summary("Download file")
+                .description("Downloads a file from the server's working directory as an attachment")
+                .addTagsItem("Files")
+                .addParametersItem(serverIdParam)
+                .addParametersItem(fileParam)
+                .responses(createStandardResponses()
+                    .addApiResponse("200", new ApiResponse()
+                        .description("File download")
+                        .content(new Content()
+                            .addMediaType("application/octet-stream", new MediaType()
+                                .schema(new StringSchema().format("binary")))))
+                    .addApiResponse("400", new ApiResponse()
+                        .description("Missing file parameter or invalid path"))
+                    .addApiResponse("403", new ApiResponse()
+                        .description("Security violation - file outside server directory"))
+                    .addApiResponse("404", new ApiResponse()
+                        .description("Server not found or file does not exist"))));
+    }
+
+    private static PathItem createFileUploadPath() {
+        Parameter serverIdParam = new Parameter()
+            .name("id")
+            .in("path")
+            .description("Server ID")
+            .required(true)
+            .style(Parameter.StyleEnum.SIMPLE)
+            .explode(false)
+            .schema(new StringSchema());
+
+        Parameter pathParam = new Parameter()
+            .name("path")
+            .in("query")
+            .description("Path where to upload the file within server directory")
+            .required(true)
+            .schema(new StringSchema().example("plugins/config.yml"));
+
+        RequestBody requestBody = new RequestBody()
+            .description("File content to upload (binary data, max 8GB)")
+            .required(true)
+            .content(new Content()
+                .addMediaType("application/octet-stream", new MediaType()
+                    .schema(new StringSchema().format("binary"))));
+
+        return new PathItem()
+            .post(new Operation()
+                .operationId("uploadFile")
+                .summary("Upload file")
+                .description("Uploads a file to the server's working directory. Maximum file size is 8GB.")
+                .addTagsItem("Files")
+                .addParametersItem(serverIdParam)
+                .addParametersItem(pathParam)
+                .requestBody(requestBody)
+                .responses(createStandardResponses()
+                    .addApiResponse("200", new ApiResponse()
+                        .description("File uploaded successfully")
+                        .content(new Content()
+                            .addMediaType("application/json", new MediaType()
+                                .schema(new ObjectSchema()
+                                    .addProperty("status", new StringSchema().example("success"))
+                                    .addProperty("data", new ObjectSchema()
+                                        .addProperty("path", new StringSchema().example("plugins/config.yml"))
+                                        .addProperty("size", new Schema<>().type("integer").format("int64").example(2048L)))
+                                    .addProperty("message", new StringSchema().example("File uploaded successfully"))
+                                    .addProperty("timestamp", new Schema<>().type("integer").format("int64").example(1752700258719L))))))
+                    .addApiResponse("400", new ApiResponse()
+                        .description("Missing path parameter, invalid path, or no file data provided"))
+                    .addApiResponse("403", new ApiResponse()
+                        .description("Security violation - path outside server directory"))
+                    .addApiResponse("404", new ApiResponse()
+                        .description("Server not found"))
+                    .addApiResponse("413", new ApiResponse()
+                        .description("File too large (exceeds 8GB limit)"))));
+    }
+
+    private static PathItem createMkdirPath() {
+        Parameter serverIdParam = new Parameter()
+            .name("id")
+            .in("path")
+            .description("Server ID")
+            .required(true)
+            .style(Parameter.StyleEnum.SIMPLE)
+            .explode(false)
+            .schema(new StringSchema());
+
+        RequestBody requestBody = new RequestBody()
+            .description("Directory creation request")
+            .required(true)
+            .content(new Content()
+                .addMediaType("application/json", new MediaType()
+                    .schema(new ObjectSchema()
+                        .addProperty("path", new StringSchema()
+                            .description("Path of the directory to create")
+                            .example("plugins/new-folder")))));
+
+        return new PathItem()
+            .post(new Operation()
+                .operationId("createDirectory")
+                .summary("Create directory")
+                .description("Creates a new directory within the server's working directory")
+                .addTagsItem("Files")
+                .addParametersItem(serverIdParam)
+                .requestBody(requestBody)
+                .responses(createStandardResponses()
+                    .addApiResponse("200", new ApiResponse()
+                        .description("Directory created successfully")
+                        .content(new Content()
+                            .addMediaType("application/json", new MediaType()
+                                .schema(new ObjectSchema()
+                                    .addProperty("status", new StringSchema().example("success"))
+                                    .addProperty("data", new ObjectSchema()
+                                        .addProperty("path", new StringSchema().example("plugins/new-folder")))
+                                    .addProperty("message", new StringSchema().example("Directory created successfully"))
+                                    .addProperty("timestamp", new Schema<>().type("integer").format("int64").example(1752700258719L))))))
+                    .addApiResponse("400", new ApiResponse()
+                        .description("Missing path parameter, invalid path, or directory already exists"))
+                    .addApiResponse("403", new ApiResponse()
+                        .description("Security violation - path outside server directory"))
+                    .addApiResponse("404", new ApiResponse()
+                        .description("Server not found"))));
+    }
+
+    private static PathItem createFileRenamePath() {
+        Parameter serverIdParam = new Parameter()
+            .name("id")
+            .in("path")
+            .description("Server ID")
+            .required(true)
+            .style(Parameter.StyleEnum.SIMPLE)
+            .explode(false)
+            .schema(new StringSchema());
+
+        return new PathItem()
+            .post(new Operation()
+                .operationId("renameFile")
+                .summary("Rename/move file")
+                .description("Renames or moves a file/directory within the server's working directory")
+                .addTagsItem("Files")
+                .addParametersItem(serverIdParam)
+                .requestBody(new RequestBody()
+                    .description("Rename operation details")
+                    .required(true)
+                    .content(new Content()
+                        .addMediaType("application/json", new MediaType()
+                            .schema(new ObjectSchema()
+                                .addProperty("oldPath", new StringSchema()
+                                    .description("Current path of the file/directory")
+                                    .example("old-config.yml"))
+                                .addProperty("newPath", new StringSchema()
+                                    .description("New path for the file/directory")
+                                    .example("config/server-config.yml"))
+                                .required(List.of("oldPath", "newPath"))))))
+                .responses(createStandardResponses()
+                    .addApiResponse("200", new ApiResponse()
+                        .description("File renamed successfully")
+                        .content(new Content()
+                            .addMediaType("application/json", new MediaType()
+                                .schema(new Schema<>().$ref("#/components/schemas/ApiResponse")))))
+                    .addApiResponse("400", new ApiResponse()
+                        .description("Missing paths or invalid request body"))
+                    .addApiResponse("403", new ApiResponse()
+                        .description("Security violation - paths outside server directory"))
+                    .addApiResponse("404", new ApiResponse()
+                        .description("Server not found or source file does not exist"))
+                    .addApiResponse("409", new ApiResponse()
+                        .description("Destination already exists"))));
+    }
+
     private static PathItem createServerActionPath(String action) {
         Parameter serverIdParam = new Parameter()
             .name("id")
@@ -316,7 +673,7 @@ public final class OpenApiGenerator {
         Parameter groupNameParam = new Parameter()
             .name("name")
             .in("path")
-            .description("Group name or display name (case-insensitive)")
+            .description("Group name (case-insensitive)")
             .required(true)
             .style(Parameter.StyleEnum.SIMPLE)
             .explode(false)
@@ -326,7 +683,7 @@ public final class OpenApiGenerator {
             .get(new Operation()
                 .operationId("getGroup")
                 .summary("Get group details")
-                .description("Returns detailed information about a specific scaling group. Searches by both group name and display name (case-insensitive).")
+                .description("Returns detailed information about a specific scaling group by name (case-insensitive).")
                 .addTagsItem("Scaling")
                 .addSecurityItem(new SecurityRequirement().addList("bearerAuth"))
                 .addParametersItem(groupNameParam)
@@ -555,6 +912,15 @@ public final class OpenApiGenerator {
                 .addProperty("data", new Schema<>().$ref("#/components/schemas/AtlasServer"))
                 .addProperty("timestamp", new Schema<>().type("integer").format("int64").example(1752700258719L))),
             
+            Map.entry("ServerLogsResponse", new ObjectSchema()
+                .addProperty("status", new StringSchema().example("success"))
+                .addProperty("data", new ObjectSchema()
+                    .addProperty("serverId", new StringSchema().example("server-123"))
+                    .addProperty("lines", new Schema<>().type("integer").example(50))
+                    .addProperty("logs", new ArraySchema().items(new StringSchema().example("[INFO] Server started successfully"))))
+                .addProperty("message", new StringSchema().example("Server logs retrieved"))
+                .addProperty("timestamp", new Schema<>().type("integer").format("int64").example(1752700258719L))),
+            
             Map.entry("CreateServerRequest", new ObjectSchema()
                 .addProperty("group", new StringSchema().example("Lobby").description("Group name"))
                 .addProperty("count", new Schema<>().type("integer")._default(1).example(2).description("Number of servers to create"))
@@ -669,6 +1035,25 @@ public final class OpenApiGenerator {
                         .addProperty("totalFormatted", new StringSchema().example("10.0 GB/s"))
                         .addProperty("receiveFormatted", new StringSchema().example("1.0 GB/s"))
                         .addProperty("sendFormatted", new StringSchema().example("512.0 MB/s"))))
+                .addProperty("timestamp", new Schema<>().type("integer").format("int64").example(1752700258719L))),
+            
+            Map.entry("FileInfo", new ObjectSchema()
+                .addProperty("name", new StringSchema().example("config.json"))
+                .addProperty("mode", new StringSchema().example("rw-r--r--"))
+                .addProperty("modeBits", new Schema<>().type("integer").example(644))
+                .addProperty("size", new Schema<>().type("integer").format("int64").nullable(true).example(1024L))
+                .addProperty("isFile", new Schema<>().type("boolean").example(true))
+                .addProperty("isSymlink", new Schema<>().type("boolean").example(false))
+                .addProperty("mimeType", new StringSchema().example("application/json"))
+                .addProperty("createdAt", new StringSchema().format("date-time").example("2025-01-16T16:45:30Z"))
+                .addProperty("modifiedAt", new StringSchema().format("date-time").example("2025-01-20T14:45:30Z"))),
+            
+            Map.entry("FileListResponse", new ObjectSchema()
+                .addProperty("status", new StringSchema().example("success"))
+                .addProperty("data", new ObjectSchema()
+                    .addProperty("path", new StringSchema().example("/plugins"))
+                    .addProperty("files", new ArraySchema()
+                        .items(new Schema<>().$ref("#/components/schemas/FileInfo"))))
                 .addProperty("timestamp", new Schema<>().type("integer").format("int64").example(1752700258719L)))
         );
     }

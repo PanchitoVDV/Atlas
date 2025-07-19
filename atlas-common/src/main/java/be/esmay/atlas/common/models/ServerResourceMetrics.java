@@ -12,6 +12,10 @@ public final class ServerResourceMetrics {
     private long memoryTotal;
     private long diskUsed;
     private long diskTotal;
+    private long networkReceiveBytes;
+    private long networkSendBytes;
+    private double networkReceiveBandwidth;
+    private double networkSendBandwidth;
     private long lastUpdated;
     
     public double getMemoryPercentage() {
@@ -22,5 +26,9 @@ public final class ServerResourceMetrics {
     public double getDiskPercentage() {
         if (this.diskTotal == 0) return 0;
         return (double) this.diskUsed / this.diskTotal * 100;
+    }
+    
+    public double getNetworkTotalBandwidth() {
+        return this.networkReceiveBandwidth + this.networkSendBandwidth;
     }
 }

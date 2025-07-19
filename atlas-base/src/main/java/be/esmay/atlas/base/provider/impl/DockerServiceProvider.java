@@ -75,6 +75,7 @@ public final class DockerServiceProvider extends ServiceProvider {
     private final Map<String, String> serverContainerIds;
     private final Map<String, Closeable> logStreamConnections;
     private final Map<String, Map<String, Consumer<String>>> logSubscribers;
+    private final Map<String, NetworkStatsCache> networkStatsCache;
     private final ExecutorService executorService;
 
     private final Set<Integer> usedProxyPorts;
@@ -94,6 +95,7 @@ public final class DockerServiceProvider extends ServiceProvider {
         this.serverContainerIds = new ConcurrentHashMap<>();
         this.logStreamConnections = new ConcurrentHashMap<>();
         this.logSubscribers = new ConcurrentHashMap<>();
+        this.networkStatsCache = new ConcurrentHashMap<>();
         this.usedProxyPorts = ConcurrentHashMap.newKeySet();
         this.serverNameToPort = new ConcurrentHashMap<>();
         this.serverIdToPort = new ConcurrentHashMap<>();
@@ -615,7 +617,6 @@ public final class DockerServiceProvider extends ServiceProvider {
                     cpuUsage = (cpuDelta / systemDelta) * stats.getCpuStats().getOnlineCpus() * 100.0;
                 }
 
-                // Get disk usage from container directory
                 AtlasServer server = this.servers.get(serverId);
                 long diskUsed = 0;
                 long diskTotal = 0;
@@ -625,12 +626,44 @@ public final class DockerServiceProvider extends ServiceProvider {
                     diskTotal = workingDir.getTotalSpace();
                 }
 
+                long networkReceiveBytes = 0;
+                long networkSendBytes = 0;
+                double networkReceiveBandwidth = 0.0;
+                double networkSendBandwidth = 0.0;
+                
+                if (stats.getNetworks() != null) {
+                    for (Map.Entry<String, StatisticNetworksConfig> entry : stats.getNetworks().entrySet()) {
+                        StatisticNetworksConfig networkStats = entry.getValue();
+                        networkReceiveBytes += networkStats.getRxBytes();
+                        networkSendBytes += networkStats.getTxBytes();
+                    }
+
+                    String previousStatsKey = "docker_network_" + serverId;
+                    NetworkStatsCache previousStats = this.networkStatsCache.get(previousStatsKey);
+                    long currentTime = System.currentTimeMillis();
+                    
+                    if (previousStats != null) {
+                        long timeDelta = currentTime - previousStats.timestamp;
+                        if (timeDelta > 0) {
+                            double timeDeltaSec = timeDelta / 1000.0;
+                            networkReceiveBandwidth = (networkReceiveBytes - previousStats.rxBytes) / timeDeltaSec;
+                            networkSendBandwidth = (networkSendBytes - previousStats.txBytes) / timeDeltaSec;
+                        }
+                    }
+
+                    this.networkStatsCache.put(previousStatsKey, new NetworkStatsCache(networkReceiveBytes, networkSendBytes, currentTime));
+                }
+
                 ServerResourceMetrics metrics = ServerResourceMetrics.builder()
                     .cpuUsage(cpuUsage)
                     .memoryUsed(memoryUsed)
                     .memoryTotal(memoryLimit)
                     .diskUsed(diskUsed)
                     .diskTotal(diskTotal)
+                    .networkReceiveBytes(networkReceiveBytes)
+                    .networkSendBytes(networkSendBytes)
+                    .networkReceiveBandwidth(networkReceiveBandwidth)
+                    .networkSendBandwidth(networkSendBandwidth)
                     .lastUpdated(System.currentTimeMillis())
                     .build();
 
@@ -1735,6 +1768,18 @@ public final class DockerServiceProvider extends ServiceProvider {
 
         } catch (Exception e) {
             Logger.error("Error during failed start cleanup for server: {}", server.getName(), e);
+        }
+    }
+    
+    private static class NetworkStatsCache {
+        final long rxBytes;
+        final long txBytes;
+        final long timestamp;
+        
+        NetworkStatsCache(long rxBytes, long txBytes, long timestamp) {
+            this.rxBytes = rxBytes;
+            this.txBytes = txBytes;
+            this.timestamp = timestamp;
         }
     }
 }

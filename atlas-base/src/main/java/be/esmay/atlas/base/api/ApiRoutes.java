@@ -2,7 +2,17 @@ package be.esmay.atlas.base.api;
 
 import be.esmay.atlas.base.AtlasBase;
 import be.esmay.atlas.base.api.dto.ApiResponse;
+import be.esmay.atlas.base.api.dto.FileInfo;
+import be.esmay.atlas.base.api.dto.FileListResponse;
+import be.esmay.atlas.base.api.dto.UploadSession;
 import be.esmay.atlas.base.config.impl.ScalerConfig;
+import be.esmay.atlas.base.files.FileManager;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import be.esmay.atlas.base.metrics.NetworkBandwidthMonitor;
 import be.esmay.atlas.base.provider.ServiceProvider;
 import be.esmay.atlas.base.scaler.Scaler;
@@ -36,6 +46,7 @@ public final class ApiRoutes {
     private final Router router;
     private final ApiAuthHandler authHandler;
     private final ObjectMapper objectMapper;
+    private final FileManager fileManager;
 
     public ApiRoutes(Router router, ApiAuthHandler authHandler) {
         this.router = router;
@@ -43,9 +54,14 @@ public final class ApiRoutes {
         this.objectMapper = new ObjectMapper();
         this.objectMapper.registerModule(new JavaTimeModule());
         this.objectMapper.enable(SerializationFeature.INDENT_OUTPUT);
+        this.fileManager = new FileManager();
     }
 
     public void setupRoutes() {
+        this.router.post("/api/v1/servers/:id/files/upload").handler(this::uploadFileWithAuth);
+
+        this.router.put("/api/v1/servers/:id/files/upload/:uploadId/chunk/:chunkNumber").handler(this::uploadChunkWithAuth);
+
         this.router.route("/api/v1/*").handler(BodyHandler.create());
         this.router.route("/api/v1/*").handler(this.authHandler.authenticate());
 
@@ -54,6 +70,16 @@ public final class ApiRoutes {
         this.router.get("/api/v1/servers/count").handler(this::getServerCount);
         this.router.get("/api/v1/players/count").handler(this::getPlayerCount);
         this.router.get("/api/v1/servers/:id").handler(this::getServer);
+        this.router.get("/api/v1/servers/:id/logs").handler(this::getServerLogs);
+        this.router.get("/api/v1/servers/:id/files").handler(this::getServerFiles);
+        this.router.get("/api/v1/servers/:id/files/contents").handler(this::getFileContents);
+        this.router.put("/api/v1/servers/:id/files/contents").handler(this::writeFileContents);
+        this.router.delete("/api/v1/servers/:id/files/contents").handler(this::deleteFile);
+        this.router.get("/api/v1/servers/:id/files/download").handler(this::downloadFile);
+        this.router.post("/api/v1/servers/:id/files/upload/start").handler(this::startChunkedUpload);
+        this.router.post("/api/v1/servers/:id/files/upload/:uploadId/complete").handler(this::completeChunkedUpload);
+        this.router.post("/api/v1/servers/:id/files/mkdir").handler(this::createDirectory);
+        this.router.post("/api/v1/servers/:id/files/rename").handler(this::renameFile);
         this.router.get("/api/v1/groups").handler(this::getGroups);
         this.router.get("/api/v1/groups/:name").handler(this::getGroup);
         this.router.get("/api/v1/scaling").handler(this::getScaling);
@@ -85,29 +111,18 @@ public final class ApiRoutes {
         String searchFilter = context.request().getParam("search");
         ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
 
-        provider.getAllServers()
-            .thenAccept(allServers -> {
-                List<AtlasServer> servers = allServers;
-                
-                // Apply group filter if specified
-                if (groupFilter != null && !groupFilter.isEmpty()) {
-                    Set<Scaler> scalers = AtlasBase.getInstance().getScalerManager().getScalers();
-                    Set<String> matchingGroupNames = scalers.stream()
-                        .filter(scaler -> {
-                            ScalerConfig.Group groupConfig = scaler.getScalerConfig().getGroup();
-                            String displayName = groupConfig.getDisplayName();
-                            String name = groupConfig.getName();
-                            
-                            return (displayName != null && displayName.equalsIgnoreCase(groupFilter)) ||
-                                   (name != null && name.equalsIgnoreCase(groupFilter));
-                        })
-                        .map(scaler -> scaler.getScalerConfig().getGroup().getName())
-                        .collect(Collectors.toSet());
-                    
-                    servers = allServers.stream()
-                        .filter(server -> matchingGroupNames.contains(server.getGroup()))
-                        .collect(Collectors.toList());
-                }
+        CompletableFuture<List<AtlasServer>> serversFuture;
+        if (groupFilter != null && !groupFilter.isEmpty()) {
+            serversFuture = provider.getAllServers()
+                .thenApply(allServers -> allServers.stream()
+                    .filter(server -> server.getGroup() != null && server.getGroup().equalsIgnoreCase(groupFilter))
+                    .collect(Collectors.toList()));
+        } else {
+            serversFuture = provider.getAllServers();
+        }
+
+        serversFuture
+            .thenAccept(servers -> {
                 if (AtlasBase.getInstance().getResourceMetricsManager() != null) {
                     for (AtlasServer server : servers) {
                         ServerResourceMetrics metrics = AtlasBase.getInstance()
@@ -244,12 +259,8 @@ public final class ApiRoutes {
         
         Scaler scaler = scalers.stream()
             .filter(s -> {
-                ScalerConfig.Group groupConfig = s.getScalerConfig().getGroup();
-                String displayName = groupConfig.getDisplayName();
-                String name = groupConfig.getName();
-                
-                return (displayName != null && displayName.equalsIgnoreCase(groupName)) ||
-                       (name != null && name.equalsIgnoreCase(groupName));
+                String name = s.getScalerConfig().getGroup().getName();
+                return name != null && name.equalsIgnoreCase(groupName);
             })
             .findFirst()
             .orElse(null);
@@ -706,6 +717,674 @@ public final class ApiRoutes {
             context.response()
                 .setStatusCode(500)
                 .end("{\"status\":\"error\",\"message\":\"Internal server error\"}");
+        }
+    }
+
+    private void getServerLogs(RoutingContext context) {
+        String serverId = context.pathParam("id");
+        String linesParam = context.request().getParam("lines");
+        int lines = -1;
+        
+        if (linesParam != null) {
+            try {
+                lines = Integer.parseInt(linesParam);
+            } catch (NumberFormatException e) {
+                this.sendError(context, "Invalid lines parameter: " + linesParam, 400);
+                return;
+            }
+        }
+
+        ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
+        CompletableFuture<Optional<AtlasServer>> serverFuture = provider.getServer(serverId);
+        
+        int finalLines = lines;
+        serverFuture.thenAccept(serverOpt -> {
+            if (serverOpt.isEmpty()) {
+                this.sendError(context, "Server not found: " + serverId, 404);
+                return;
+            }
+
+            provider.getServerLogs(serverId, finalLines)
+                .thenAccept(logLines -> {
+                    Map<String, Object> response = new HashMap<>();
+                    response.put("serverId", serverId);
+                    response.put("lines", logLines.size());
+                    response.put("logs", logLines);
+                    this.sendResponse(context, ApiResponse.success(response, "Server logs retrieved"));
+                })
+                .exceptionally(throwable -> {
+                    this.sendError(context, "Failed to get server logs: " + throwable.getMessage());
+                    return null;
+                });
+        })
+        .exceptionally(throwable -> {
+            this.sendError(context, "Failed to find server: " + throwable.getMessage());
+            return null;
+        });
+    }
+
+    private void getServerFiles(RoutingContext context) {
+        String serverId = context.pathParam("id");
+        String path = context.request().getParam("path");
+        
+        if (path == null || path.isEmpty()) {
+            path = "/";
+        }
+        
+        final String finalPath = path;
+
+        if (!this.fileManager.isValidPath(finalPath)) {
+            this.sendError(context, "Invalid path: directory traversal not allowed", 400);
+            return;
+        }
+
+        ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
+
+        provider.getServer(serverId)
+            .thenAccept(serverOpt -> {
+                if (serverOpt.isEmpty()) {
+                    this.sendError(context, "Server not found: " + serverId, 404);
+                    return;
+                }
+
+                AtlasServer server = serverOpt.get();
+                String workingDirectory = server.getWorkingDirectory();
+                
+                if (workingDirectory == null || workingDirectory.isEmpty()) {
+                    this.sendError(context, "Server working directory not set: " + serverId, 500);
+                    return;
+                }
+
+                try {
+                    FileListResponse response = this.fileManager.listFiles(workingDirectory, finalPath);
+                    this.sendResponse(context, ApiResponse.success(response));
+                } catch (SecurityException e) {
+                    Logger.warn("Security violation: attempted directory traversal for server {} at path {}: {}", serverId, finalPath, e.getMessage());
+                    this.sendError(context, "Security violation: " + e.getMessage(), 403);
+                } catch (Exception e) {
+                    Logger.error("Failed to list server files for " + serverId + " at path " + finalPath, e);
+                    this.sendError(context, "Failed to list server files: " + e.getMessage());
+                }
+            })
+            .exceptionally(throwable -> {
+                this.sendError(context, "Failed to find server: " + throwable.getMessage());
+                return null;
+            });
+    }
+    
+    private void getFileContents(RoutingContext context) {
+        String serverId = context.pathParam("id");
+        String filePath = context.request().getParam("file");
+        
+        if (filePath == null || filePath.isEmpty()) {
+            this.sendError(context, "File parameter is required", 400);
+            return;
+        }
+
+        if (!this.fileManager.isValidPath(filePath)) {
+            this.sendError(context, "Invalid file path: directory traversal not allowed", 400);
+            return;
+        }
+
+        ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
+
+        provider.getServer(serverId)
+            .thenAccept(serverOpt -> {
+                if (serverOpt.isEmpty()) {
+                    this.sendError(context, "Server not found: " + serverId, 404);
+                    return;
+                }
+
+                AtlasServer server = serverOpt.get();
+                String workingDirectory = server.getWorkingDirectory();
+                
+                if (workingDirectory == null || workingDirectory.isEmpty()) {
+                    this.sendError(context, "Server working directory not set: " + serverId, 500);
+                    return;
+                }
+
+                try {
+                    String fileContents = this.fileManager.readFileContents(workingDirectory, filePath);
+
+                    context.response()
+                        .putHeader("Content-Type", "text/plain; charset=utf-8")
+                        .end(fileContents);
+                        
+                } catch (SecurityException e) {
+                    Logger.warn("Security violation: attempted file access outside server directory for server {} at path {}: {}", serverId, filePath, e.getMessage());
+                    this.sendError(context, "Security violation: " + e.getMessage(), 403);
+                } catch (Exception e) {
+                    Logger.error("Failed to read file contents for server {} at path {}", serverId, filePath, e);
+                    this.sendError(context, "Failed to read file: " + e.getMessage());
+                }
+            })
+            .exceptionally(throwable -> {
+                this.sendError(context, "Failed to find server: " + throwable.getMessage());
+                return null;
+            });
+    }
+    
+    private void writeFileContents(RoutingContext context) {
+        String serverId = context.pathParam("id");
+        String filePath = context.request().getParam("file");
+        
+        if (filePath == null || filePath.isEmpty()) {
+            this.sendError(context, "File parameter is required", 400);
+            return;
+        }
+
+        if (!this.fileManager.isValidPath(filePath)) {
+            this.sendError(context, "Invalid file path: directory traversal not allowed", 400);
+            return;
+        }
+
+        ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
+
+        provider.getServer(serverId)
+            .thenAccept(serverOpt -> {
+                if (serverOpt.isEmpty()) {
+                    this.sendError(context, "Server not found: " + serverId, 404);
+                    return;
+                }
+
+                AtlasServer server = serverOpt.get();
+                String workingDirectory = server.getWorkingDirectory();
+                
+                if (workingDirectory == null || workingDirectory.isEmpty()) {
+                    this.sendError(context, "Server working directory not set: " + serverId, 500);
+                    return;
+                }
+
+                String content = context.body().asString();
+                if (content == null) {
+                    content = "";
+                }
+
+                try {
+                    this.fileManager.writeFileContents(workingDirectory, filePath, content);
+                    this.sendResponse(context, ApiResponse.success(null, "File written successfully"));
+                        
+                } catch (SecurityException e) {
+                    Logger.warn("Security violation: attempted file write outside server directory for server {} at path {}: {}", serverId, filePath, e.getMessage());
+                    this.sendError(context, "Security violation: " + e.getMessage(), 403);
+                } catch (Exception e) {
+                    Logger.error("Failed to write file contents for server {} at path {}", serverId, filePath, e);
+                    this.sendError(context, "Failed to write file: " + e.getMessage());
+                }
+            })
+            .exceptionally(throwable -> {
+                this.sendError(context, "Failed to find server: " + throwable.getMessage());
+                return null;
+            });
+    }
+    
+    private void deleteFile(RoutingContext context) {
+        String serverId = context.pathParam("id");
+        String filePath = context.request().getParam("file");
+        
+        if (filePath == null || filePath.isEmpty()) {
+            this.sendError(context, "File parameter is required", 400);
+            return;
+        }
+
+        if (!this.fileManager.isValidPath(filePath)) {
+            this.sendError(context, "Invalid file path: directory traversal not allowed", 400);
+            return;
+        }
+
+        ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
+
+        provider.getServer(serverId)
+            .thenAccept(serverOpt -> {
+                if (serverOpt.isEmpty()) {
+                    this.sendError(context, "Server not found: " + serverId, 404);
+                    return;
+                }
+
+                AtlasServer server = serverOpt.get();
+                String workingDirectory = server.getWorkingDirectory();
+                
+                if (workingDirectory == null || workingDirectory.isEmpty()) {
+                    this.sendError(context, "Server working directory not set: " + serverId, 500);
+                    return;
+                }
+
+                try {
+                    this.fileManager.deleteFile(workingDirectory, filePath);
+                    this.sendResponse(context, ApiResponse.success(null, "File deleted successfully"));
+                        
+                } catch (SecurityException e) {
+                    Logger.warn("Security violation: attempted file deletion outside server directory for server {} at path {}: {}", serverId, filePath, e.getMessage());
+                    this.sendError(context, "Security violation: " + e.getMessage(), 403);
+                } catch (Exception e) {
+                    Logger.error("Failed to delete file for server {} at path {}", serverId, filePath, e);
+                    this.sendError(context, "Failed to delete file: " + e.getMessage());
+                }
+            })
+            .exceptionally(throwable -> {
+                this.sendError(context, "Failed to find server: " + throwable.getMessage());
+                return null;
+            });
+    }
+    
+    private void downloadFile(RoutingContext context) {
+        String serverId = context.pathParam("id");
+        String filePath = context.request().getParam("file");
+        
+        if (filePath == null || filePath.isEmpty()) {
+            this.sendError(context, "File parameter is required", 400);
+            return;
+        }
+
+        if (!this.fileManager.isValidPath(filePath)) {
+            this.sendError(context, "Invalid file path: directory traversal not allowed", 400);
+            return;
+        }
+
+        ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
+
+        provider.getServer(serverId)
+            .thenAccept(serverOpt -> {
+                if (serverOpt.isEmpty()) {
+                    this.sendError(context, "Server not found: " + serverId, 404);
+                    return;
+                }
+
+                AtlasServer server = serverOpt.get();
+                String workingDirectory = server.getWorkingDirectory();
+                
+                if (workingDirectory == null || workingDirectory.isEmpty()) {
+                    this.sendError(context, "Server working directory not set: " + serverId, 500);
+                    return;
+                }
+
+                try {
+                    this.fileManager.downloadFile(context, workingDirectory, filePath);
+                        
+                } catch (SecurityException e) {
+                    Logger.warn("Security violation: attempted file download outside server directory for server {} at path {}: {}", serverId, filePath, e.getMessage());
+                    this.sendError(context, "Security violation: " + e.getMessage(), 403);
+                } catch (Exception e) {
+                    Logger.error("Failed to download file for server {} at path {}", serverId, filePath, e);
+                    this.sendError(context, "Failed to download file: " + e.getMessage());
+                }
+            })
+            .exceptionally(throwable -> {
+                this.sendError(context, "Failed to find server: " + throwable.getMessage());
+                return null;
+            });
+    }
+    
+    private void renameFile(RoutingContext context) {
+        String serverId = context.pathParam("id");
+        JsonObject body = context.body().asJsonObject();
+        
+        if (body == null) {
+            this.sendError(context, "Request body is required", 400);
+            return;
+        }
+        
+        String oldPath = body.getString("oldPath");
+        String newPath = body.getString("newPath");
+        
+        if (oldPath == null || oldPath.isEmpty()) {
+            this.sendError(context, "oldPath is required", 400);
+            return;
+        }
+        
+        if (newPath == null || newPath.isEmpty()) {
+            this.sendError(context, "newPath is required", 400);
+            return;
+        }
+
+        if (!this.fileManager.isValidPath(oldPath) || !this.fileManager.isValidPath(newPath)) {
+            this.sendError(context, "Invalid file path: directory traversal not allowed", 400);
+            return;
+        }
+
+        ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
+
+        provider.getServer(serverId)
+            .thenAccept(serverOpt -> {
+                if (serverOpt.isEmpty()) {
+                    this.sendError(context, "Server not found: " + serverId, 404);
+                    return;
+                }
+
+                AtlasServer server = serverOpt.get();
+                String workingDirectory = server.getWorkingDirectory();
+                
+                if (workingDirectory == null || workingDirectory.isEmpty()) {
+                    this.sendError(context, "Server working directory not set: " + serverId, 500);
+                    return;
+                }
+
+                try {
+                    this.fileManager.renameFile(workingDirectory, oldPath, newPath);
+                    this.sendResponse(context, ApiResponse.success(null, "File renamed successfully"));
+                        
+                } catch (SecurityException e) {
+                    Logger.warn("Security violation: attempted file rename outside server directory for server {} from {} to {}: {}", serverId, oldPath, newPath, e.getMessage());
+                    this.sendError(context, "Security violation: " + e.getMessage(), 403);
+                } catch (Exception e) {
+                    Logger.error("Failed to rename file for server {} from {} to {}", serverId, oldPath, newPath, e);
+                    this.sendError(context, "Failed to rename file: " + e.getMessage());
+                }
+            })
+            .exceptionally(throwable -> {
+                this.sendError(context, "Failed to find server: " + throwable.getMessage());
+                return null;
+            });
+    }
+    
+    private void uploadFileWithAuth(RoutingContext context) {
+        String authHeader = context.request().getHeader("Authorization");
+        String token = this.authHandler.extractBearerToken(authHeader);
+        
+        if (!this.authHandler.isValidToken(token)) {
+            this.sendError(context, "Unauthorized: Invalid or missing API key", 401);
+            return;
+        }
+
+        this.uploadFile(context);
+    }
+    
+    private void uploadFile(RoutingContext context) {
+        String serverId = context.pathParam("id");
+        String targetPath = context.request().getParam("path");
+        
+        if (targetPath == null || targetPath.isEmpty()) {
+            this.sendError(context, "Path parameter is required", 400);
+            return;
+        }
+
+        if (!this.fileManager.isValidPath(targetPath)) {
+            this.sendError(context, "Invalid file path: directory traversal not allowed", 400);
+            return;
+        }
+
+        ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
+
+        provider.getServer(serverId)
+            .thenAccept(serverOpt -> {
+                if (serverOpt.isEmpty()) {
+                    this.sendError(context, "Server not found: " + serverId, 404);
+                    return;
+                }
+
+                AtlasServer server = serverOpt.get();
+                String workingDirectory = server.getWorkingDirectory();
+                
+                if (workingDirectory == null || workingDirectory.isEmpty()) {
+                    this.sendError(context, "Server working directory not set: " + serverId, 500);
+                    return;
+                }
+
+                try {
+                    this.fileManager.uploadFileStream(workingDirectory, targetPath, context.request())
+                        .thenAccept(fileSize -> {
+                            Map<String, Object> response = new HashMap<>();
+                            response.put("path", targetPath);
+                            response.put("size", fileSize);
+                            
+                            this.sendResponse(context, ApiResponse.success(response, "File uploaded successfully"));
+                        })
+                        .exceptionally(throwable -> {
+                            if (throwable.getCause() instanceof SecurityException) {
+                                Logger.warn("Security violation: attempted file upload outside server directory for server {} at path {}: {}", serverId, targetPath, throwable.getMessage());
+                                this.sendError(context, "Security violation: " + throwable.getCause().getMessage(), 403);
+                            } else {
+                                Logger.error("Failed to upload file for server {} at path {}", serverId, targetPath, throwable);
+                                this.sendError(context, "Failed to upload file: " + throwable.getMessage());
+                            }
+                            return null;
+                        });
+                        
+                } catch (SecurityException e) {
+                    Logger.warn("Security violation: attempted file upload outside server directory for server {} at path {}: {}", serverId, targetPath, e.getMessage());
+                    this.sendError(context, "Security violation: " + e.getMessage(), 403);
+                } catch (Exception e) {
+                    Logger.error("Failed to upload file for server {} at path {}", serverId, targetPath, e);
+                    this.sendError(context, "Failed to upload file: " + e.getMessage());
+                }
+            })
+            .exceptionally(throwable -> {
+                this.sendError(context, "Failed to find server: " + throwable.getMessage());
+                return null;
+            });
+    }
+    
+    private void createDirectory(RoutingContext context) {
+        String serverId = context.pathParam("id");
+        JsonObject body = context.body().asJsonObject();
+        
+        if (body == null) {
+            this.sendError(context, "Request body is required", 400);
+            return;
+        }
+        
+        String directoryPath = body.getString("path");
+        
+        if (directoryPath == null || directoryPath.isEmpty()) {
+            this.sendError(context, "Path is required", 400);
+            return;
+        }
+
+        if (!this.fileManager.isValidPath(directoryPath)) {
+            this.sendError(context, "Invalid directory path: directory traversal not allowed", 400);
+            return;
+        }
+
+        ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
+
+        provider.getServer(serverId)
+            .thenAccept(serverOpt -> {
+                if (serverOpt.isEmpty()) {
+                    this.sendError(context, "Server not found: " + serverId, 404);
+                    return;
+                }
+
+                AtlasServer server = serverOpt.get();
+                String workingDirectory = server.getWorkingDirectory();
+                
+                if (workingDirectory == null || workingDirectory.isEmpty()) {
+                    this.sendError(context, "Server working directory not set: " + serverId, 500);
+                    return;
+                }
+
+                try {
+                    this.fileManager.createDirectory(workingDirectory, directoryPath);
+                    
+                    Map<String, Object> response = new HashMap<>();
+                    response.put("path", directoryPath);
+                    
+                    this.sendResponse(context, ApiResponse.success(response, "Directory created successfully"));
+                        
+                } catch (SecurityException e) {
+                    Logger.warn("Security violation: attempted directory creation outside server directory for server {} at path {}: {}", serverId, directoryPath, e.getMessage());
+                    this.sendError(context, "Security violation: " + e.getMessage(), 403);
+                } catch (Exception e) {
+                    Logger.error("Failed to create directory for server {} at path {}", serverId, directoryPath, e);
+                    this.sendError(context, "Failed to create directory: " + e.getMessage());
+                }
+            })
+            .exceptionally(throwable -> {
+                this.sendError(context, "Failed to find server: " + throwable.getMessage());
+                return null;
+            });
+    }
+    
+    private void startChunkedUpload(RoutingContext context) {
+        String serverId = context.pathParam("id");
+        JsonObject body = context.body().asJsonObject();
+        
+        if (body == null) {
+            this.sendError(context, "Request body is required", 400);
+            return;
+        }
+        
+        String targetPath = body.getString("path");
+        Long totalSize = body.getLong("totalSize");
+        Integer chunkSize = body.getInteger("chunkSize");
+        
+        if (targetPath == null || targetPath.isEmpty()) {
+            this.sendError(context, "Path is required", 400);
+            return;
+        }
+        
+        if (totalSize == null || totalSize <= 0) {
+            this.sendError(context, "totalSize is required and must be positive", 400);
+            return;
+        }
+        
+        if (totalSize > 8L * 1024 * 1024 * 1024) { // 8GB limit
+            this.sendError(context, "File size exceeds maximum limit of 8GB", 413);
+            return;
+        }
+
+        if (!this.fileManager.isValidPath(targetPath)) {
+            this.sendError(context, "Invalid file path: directory traversal not allowed", 400);
+            return;
+        }
+
+        ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
+        
+        provider.getServer(serverId)
+            .thenAccept(serverOpt -> {
+                if (serverOpt.isEmpty()) {
+                    this.sendError(context, "Server not found: " + serverId, 404);
+                    return;
+                }
+
+                AtlasServer server = serverOpt.get();
+                String workingDirectory = server.getWorkingDirectory();
+                
+                if (workingDirectory == null || workingDirectory.isEmpty()) {
+                    this.sendError(context, "Server working directory not set: " + serverId, 500);
+                    return;
+                }
+
+                try {
+                    UploadSession session = this.fileManager.startChunkedUpload(workingDirectory, targetPath, totalSize, chunkSize);
+                    
+                    Map<String, Object> response = new HashMap<>();
+                    response.put("uploadId", session.getUploadId());
+                    response.put("chunkSize", session.getChunkSize());
+                    response.put("totalChunks", session.getTotalChunks());
+                    response.put("path", targetPath);
+                    
+                    this.sendResponse(context, ApiResponse.success(response, "Upload session started"));
+                        
+                } catch (SecurityException e) {
+                    Logger.warn("Security violation: attempted upload start outside server directory for server {} at path {}: {}", serverId, targetPath, e.getMessage());
+                    this.sendError(context, "Security violation: " + e.getMessage(), 403);
+                } catch (Exception e) {
+                    Logger.error("Failed to start upload session for server {} at path {}", serverId, targetPath, e);
+                    this.sendError(context, "Failed to start upload session: " + e.getMessage());
+                }
+            })
+            .exceptionally(throwable -> {
+                this.sendError(context, "Failed to find server: " + throwable.getMessage());
+                return null;
+            });
+    }
+    
+    private void uploadChunkWithAuth(RoutingContext context) {
+        String authHeader = context.request().getHeader("Authorization");
+        String token = this.authHandler.extractBearerToken(authHeader);
+        
+        if (!this.authHandler.isValidToken(token)) {
+            this.sendError(context, "Unauthorized: Invalid or missing API key", 401);
+            return;
+        }
+        
+        this.uploadChunk(context);
+    }
+    
+    private void uploadChunk(RoutingContext context) {
+        String uploadId = context.pathParam("uploadId");
+        String chunkNumberStr = context.pathParam("chunkNumber");
+        
+        if (uploadId == null || uploadId.isEmpty()) {
+            this.sendError(context, "Upload ID is required", 400);
+            return;
+        }
+        
+        int chunkNumber;
+        try {
+            chunkNumber = Integer.parseInt(chunkNumberStr);
+        } catch (NumberFormatException e) {
+            this.sendError(context, "Invalid chunk number: " + chunkNumberStr, 400);
+            return;
+        }
+        
+        UploadSession session = this.fileManager.getUploadSession(uploadId);
+        if (session == null) {
+            this.sendError(context, "Upload session not found: " + uploadId, 404);
+            return;
+        }
+
+        context.request().bodyHandler(buffer -> {
+            if (buffer == null || buffer.length() == 0) {
+                this.sendError(context, "No chunk data provided", 400);
+                return;
+            }
+
+            byte[] chunkData = buffer.getBytes();
+
+            try {
+                this.fileManager.uploadChunk(uploadId, chunkNumber, chunkData);
+                
+                Map<String, Object> response = new HashMap<>();
+                response.put("uploadId", uploadId);
+                response.put("chunkNumber", chunkNumber);
+                response.put("receivedChunks", session.getReceivedChunks().size());
+                response.put("totalChunks", session.getTotalChunks());
+                response.put("progress", session.getProgress());
+                response.put("isComplete", session.isComplete());
+                
+                this.sendResponse(context, ApiResponse.success(response, "Chunk uploaded successfully"));
+                    
+            } catch (Exception e) {
+                Logger.error("Failed to upload chunk {} for session {}", chunkNumber, uploadId, e);
+                this.sendError(context, "Failed to upload chunk: " + e.getMessage());
+            }
+        });
+        
+        context.request().exceptionHandler(throwable -> {
+            Logger.error("Failed to read chunk data for session {}", uploadId, throwable);
+            this.sendError(context, "Failed to read chunk data: " + throwable.getMessage());
+        });
+    }
+    
+    private void completeChunkedUpload(RoutingContext context) {
+        String uploadId = context.pathParam("uploadId");
+        
+        if (uploadId == null || uploadId.isEmpty()) {
+            this.sendError(context, "Upload ID is required", 400);
+            return;
+        }
+        
+        UploadSession session = this.fileManager.getUploadSession(uploadId);
+        if (session == null) {
+            this.sendError(context, "Upload session not found: " + uploadId, 404);
+            return;
+        }
+
+        try {
+            long finalSize = this.fileManager.completeChunkedUpload(uploadId);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("uploadId", uploadId);
+            response.put("path", session.getTargetPath());
+            response.put("size", finalSize);
+            response.put("totalChunks", session.getTotalChunks());
+            
+            this.sendResponse(context, ApiResponse.success(response, "Upload completed successfully"));
+                
+        } catch (Exception e) {
+            Logger.error("Failed to complete upload session {}", uploadId, e);
+            this.sendError(context, "Failed to complete upload: " + e.getMessage());
         }
     }
 }
