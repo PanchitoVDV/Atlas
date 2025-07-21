@@ -18,10 +18,10 @@ public final class PlayerKickedFromServerListener extends AbstractListener {
 
     @Subscribe(order = PostOrder.FIRST)
     public void onKickedFromServer(KickedFromServerEvent event) {
-        Component reason = ChatUtils.format("<dark_red>You have been kicked from %1:\n",
-                event.getServer().getServerInfo().getName()).append(event.getServerKickReason().orElse(ChatUtils.format("Unknown reason.")));
+        Component reason = ChatUtils.format(String.join("\n", this.gateModule.getPlugin().getMessagesConfiguration().getKickedMessage()),
+                event.getServer().getServerInfo().getName(), event.getServerKickReason().orElse(ChatUtils.format("Unknown reason.")));
 
-        AtlasServer selectedServer = this.gateModule.getNextServerInGroup("Lobby", event.getServer().getServerInfo().getName());
+        AtlasServer selectedServer = this.gateModule.getNextServerInGroup(this.gateModule.getPlugin().getDefaultConfiguration().getLobbyGroup(), event.getServer().getServerInfo().getName());
         if (selectedServer == null) {
             event.setResult(KickedFromServerEvent.DisconnectPlayer.create(reason));
 

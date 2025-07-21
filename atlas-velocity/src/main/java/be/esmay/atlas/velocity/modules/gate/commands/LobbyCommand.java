@@ -2,6 +2,7 @@ package be.esmay.atlas.velocity.modules.gate.commands;
 
 import be.esmay.atlas.common.models.AtlasServer;
 import be.esmay.atlas.velocity.modules.gate.GateModule;
+import be.esmay.atlas.velocity.modules.scaling.api.AtlasVelocityAPI;
 import be.esmay.atlas.velocity.utils.ChatUtils;
 import com.velocitypowered.api.command.CommandSource;
 import com.velocitypowered.api.command.RawCommand;
@@ -22,24 +23,25 @@ public final class LobbyCommand implements RawCommand {
             return;
         }
 
-        if (player.getCurrentServer().map(server -> server.getServerInfo().getName()).orElse("").toLowerCase().startsWith("lobby")) {
-            player.sendMessage(ChatUtils.format("<dark_red>You are already in a lobby!"));
+        AtlasServer currentAtlasServer = AtlasVelocityAPI.getServerByName(System.getenv("SERVER_NAME")).orElse(null);
+        if (currentAtlasServer == null || currentAtlasServer.getGroup().equalsIgnoreCase(this.gateModule.getPlugin().getDefaultConfiguration().getLobbyGroup())) {
+            player.sendMessage(ChatUtils.format(this.gateModule.getPlugin().getMessagesConfiguration().getAlreadyInLobby()));
             return;
         }
 
-        AtlasServer atlasServer = this.gateModule.getNextServerInGroup("Lobby");
+        AtlasServer atlasServer = this.gateModule.getNextServerInGroup(this.gateModule.getPlugin().getDefaultConfiguration().getLobbyGroup());
         if (atlasServer == null) {
-            source.sendMessage(ChatUtils.format("<dark_red>No lobby servers are available at the moment."));
+            source.sendMessage(ChatUtils.format(this.gateModule.getPlugin().getMessagesConfiguration().getNoServersAvailable()));
             return;
         }
 
         RegisteredServer registeredServer = this.gateModule.getPlugin().getProxyServer().getServer(atlasServer.getName()).orElse(null);
         if (registeredServer == null) {
-            source.sendMessage(ChatUtils.format("<dark_red>Lobby server is not available at the moment."));
+            source.sendMessage(ChatUtils.format(this.gateModule.getPlugin().getMessagesConfiguration().getNoServersAvailable()));
             return;
         }
 
         player.createConnectionRequest(registeredServer).fireAndForget();
-        player.sendMessage(ChatUtils.format("<green>Connected you to <dark_green>%1<green>!", atlasServer.getName()));
+        player.sendMessage(ChatUtils.format(this.gateModule.getPlugin().getMessagesConfiguration().getConnectingToLobby(), atlasServer.getName()));
     }
 }

@@ -18,6 +18,7 @@ import lombok.Getter;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -37,6 +38,16 @@ public abstract class Scaler {
     protected final Map<String, AtlasServer> servers = new ConcurrentHashMap<>();
     protected final Set<String> pendingRemovals = ConcurrentHashMap.newKeySet();
     protected final Set<String> reservedNames = ConcurrentHashMap.newKeySet();
+    /**
+     * -- GETTER --
+     *  Gets the set of manually stopped server IDs.
+     *  Used by zombie detection to skip manually stopped servers.
+     *
+     * @return Set of manually stopped server IDs
+     */
+    @Getter
+    protected final Set<String> manuallyStopped = ConcurrentHashMap.newKeySet();
+    protected final Set<String> currentlyRestarting = ConcurrentHashMap.newKeySet();
 
     protected volatile boolean shutdown = false;
     protected volatile boolean paused = false;
@@ -353,6 +364,13 @@ public abstract class Scaler {
     }
 
     public void removeServerFromTracking(String serverId) {
+        AtlasServer server = this.servers.get(serverId);
+        if (server != null) {
+            Logger.debug("Removing server {} (type: {}, status: {}) from scaler tracking for group {}", 
+                serverId, server.getType(), 
+                server.getServerInfo() != null ? server.getServerInfo().getStatus() : "null",
+                this.groupName);
+        }
         this.servers.remove(serverId);
         this.pendingRemovals.remove(serverId);
         Logger.debug("Removed server {} from tracking and pending removals", serverId);
@@ -441,10 +459,18 @@ public abstract class Scaler {
         this.servers.put(server.getServerId(), server);
         this.reservedNames.remove(server.getName());
 
-        if (server.getServerInfo() != null && server.getServerInfo().getStatus() == ServerStatus.RUNNING) {
-            AtlasBase atlasInstance = AtlasBase.getInstance();
-            if (atlasInstance != null && atlasInstance.getNettyServer() != null) {
-                atlasInstance.getNettyServer().broadcastServerAdd(server);
+        if (server.getServerInfo() != null) {
+            ServerStatus status = server.getServerInfo().getStatus();
+            if (status == ServerStatus.RUNNING) {
+                AtlasBase atlasInstance = AtlasBase.getInstance();
+                if (atlasInstance != null && atlasInstance.getNettyServer() != null) {
+                    atlasInstance.getNettyServer().broadcastServerAdd(server);
+                }
+            } else if (status == ServerStatus.STARTING) {
+                AtlasBase atlasInstance = AtlasBase.getInstance();
+                if (atlasInstance != null && atlasInstance.getNettyServer() != null) {
+                    atlasInstance.getNettyServer().broadcastServerUpdate(server);
+                }
             }
         }
     }
@@ -463,6 +489,10 @@ public abstract class Scaler {
                 return;
 
             atlasInstance.getNettyServer().broadcastServerAdd(server);
+
+            if (atlasInstance.getApiManager() != null && atlasInstance.getApiManager().getWebSocketManager() != null) {
+                atlasInstance.getApiManager().getWebSocketManager().broadcastServerStatusUpdate(serverId, "RUNNING");
+            }
             return;
         }
 
@@ -477,12 +507,17 @@ public abstract class Scaler {
 
     public void updateServerInfo(String serverId, ServerInfo serverInfo) {
         AtlasServer server = this.servers.get(serverId);
-        if (server == null)
+        if (server == null) {
+            Logger.warn("Received heartbeat for server {} but it's not in scaler tracking for group {}. Available servers: {}", 
+                serverId, this.groupName, this.servers.keySet());
             return;
+        }
+
 
         ServerStatus oldStatus = server.getServerInfo() != null ? server.getServerInfo().getStatus() : null;
         server.setServerInfo(serverInfo);
         server.setLastHeartbeat(System.currentTimeMillis());
+
 
         ServerStatus newStatus = serverInfo.getStatus();
         if (oldStatus != ServerStatus.RUNNING && newStatus == ServerStatus.RUNNING) {
@@ -491,6 +526,10 @@ public abstract class Scaler {
                 return;
 
             atlasInstance.getNettyServer().broadcastServerAdd(server);
+
+            if (atlasInstance.getApiManager() != null && atlasInstance.getApiManager().getWebSocketManager() != null) {
+                atlasInstance.getApiManager().getWebSocketManager().broadcastServerStatusUpdate(serverId, "RUNNING");
+            }
             return;
         }
 
@@ -647,30 +686,58 @@ public abstract class Scaler {
             long timeSinceLastHeartbeat = currentTime - server.getLastHeartbeat();
 
             if (server.getServerInfo().getStatus() == ServerStatus.RUNNING && timeSinceLastHeartbeat > 15000) {
-                Logger.warn("Server {} hasn't sent heartbeat in {} seconds, marking for removal", server.getName(), timeSinceLastHeartbeat / 1000);
-                serversToRemove.add(server);
+                if (this.manuallyStopped.contains(server.getServerId())) {
+                    Logger.info("Server {} was manually stopped, not restarting due to heartbeat timeout", server.getName());
+                    this.handleServerActuallyStopped(server);
+                } else {
+                    Logger.warn("Server {} hasn't sent heartbeat in {} seconds, marking for removal", server.getName(), timeSinceLastHeartbeat / 1000);
+                    serversToRemove.add(server);
+                }
             } else if (server.getServerInfo().getStatus() == ServerStatus.STARTING && timeSinceLastHeartbeat > 180000) {
-                Logger.warn("Starting server {} hasn't sent heartbeat in {} seconds, marking for removal", server.getName(), timeSinceLastHeartbeat / 1000);
-                serversToRemove.add(server);
+                if (this.manuallyStopped.contains(server.getServerId())) {
+                    Logger.info("Starting server {} was manually stopped, not restarting due to heartbeat timeout", server.getName());
+                    this.handleServerActuallyStopped(server);
+                } else {
+                    Logger.warn("Starting server {} hasn't sent heartbeat in {} seconds, marking for removal", server.getName(), timeSinceLastHeartbeat / 1000);
+                    serversToRemove.add(server);
+                }
+            } else if (server.getServerInfo().getStatus() == ServerStatus.STOPPING && timeSinceLastHeartbeat > 15000) {
+                Logger.info("Server {} heartbeat timeout during shutdown (container monitoring will handle status)", server.getName());
             }
         }
 
         for (AtlasServer server : serversToRemove) {
-            // Use connection lost options for heartbeat timeouts
             String serverId = server.getServerId();
+
+            if (this.manuallyStopped.contains(serverId)) {
+                Logger.info("Skipping restart of manually stopped server: {}", server.getName());
+                this.handleServerActuallyStopped(server);
+                continue;
+            }
+            
             this.pendingRemovals.add(serverId);
             
-            this.lifecycleService.removeServer(server, DeletionOptions.connectionLost()).thenRun(() -> {
-                this.pendingRemovals.remove(serverId);
-                Logger.debug("Completed heartbeat timeout removal of server: {} (removed from pending)", server.getName());
-            }).exceptionally(throwable -> {
-                this.pendingRemovals.remove(serverId);
-                Logger.error("Failed to remove server {} after heartbeat timeout (removed from pending)", server.getName(), throwable);
-                return null;
-            });
+            if (server.getType() == ServerType.STATIC) {
+                this.lifecycleService.stopServer(server).thenRun(() -> {
+                    this.pendingRemovals.remove(serverId);
+                    Logger.debug("Completed heartbeat timeout stop of STATIC server: {} (removed from pending)", server.getName());
+                }).exceptionally(throwable -> {
+                    this.pendingRemovals.remove(serverId);
+                    Logger.error("Failed to stop STATIC server {} after heartbeat timeout (removed from pending)", server.getName(), throwable);
+                    return null;
+                });
+            } else {
+                this.lifecycleService.removeServer(server, DeletionOptions.connectionLost()).thenRun(() -> {
+                    this.pendingRemovals.remove(serverId);
+                    Logger.debug("Completed heartbeat timeout removal of DYNAMIC server: {} (removed from pending)", server.getName());
+                }).exceptionally(throwable -> {
+                    this.pendingRemovals.remove(serverId);
+                    Logger.error("Failed to remove DYNAMIC server {} after heartbeat timeout (removed from pending)", server.getName(), throwable);
+                    return null;
+                });
+            }
         }
 
-        // Validate server state to detect and clean up zombie servers
         this.serviceProvider.validateServerState();
     }
 
@@ -690,6 +757,38 @@ public abstract class Scaler {
     public void validateAndCleanupZombieServers() {
         Logger.debug("Running manual zombie server validation for group: {}", this.groupName);
         this.serviceProvider.validateServerState();
+    }
+
+    private void handleServerActuallyStopped(AtlasServer server) {
+        if (this.manuallyStopped.contains(server.getServerId())) {
+            Logger.debug("Server {} was manually stopped and will remain down", server.getName());
+        }
+        
+        Logger.debug("Server {} manual stop handling complete", server.getName());
+    }
+
+    public void markServerAsManuallyStopped(String serverId) {
+        this.manuallyStopped.add(serverId);
+        Logger.debug("Marked server {} as manually stopped", serverId);
+    }
+
+    public void clearManualStopFlag(String serverId) {
+        this.manuallyStopped.remove(serverId);
+        Logger.debug("Cleared manual stop flag for server {}", serverId);
+    }
+
+    public void markServerAsRestarting(String serverId) {
+        this.currentlyRestarting.add(serverId);
+        Logger.debug("Marked server {} as currently restarting", serverId);
+    }
+
+    public void clearRestartFlag(String serverId) {
+        this.currentlyRestarting.remove(serverId);
+        Logger.debug("Cleared restart flag for server {}", serverId);
+    }
+
+    public boolean isCurrentlyRestarting(String serverId) {
+        return this.currentlyRestarting.contains(serverId);
     }
 
 }

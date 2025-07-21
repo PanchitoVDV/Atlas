@@ -17,6 +17,7 @@ public final class ApiManager {
     private HttpServer httpServer;
     private Router router;
     private ApiAuthHandler authHandler;
+    private WebSocketTokenManager tokenManager;
     private WebSocketManager webSocketManager;
     private ApiRoutes apiRoutes;
     private ApiDocumentation apiDocumentation;
@@ -38,6 +39,8 @@ public final class ApiManager {
         try {
             this.config = this.atlasBase.getConfigManager().getAtlasConfig().getAtlas();
             this.authHandler = new ApiAuthHandler(this.config.getNetwork().getApiKey());
+            this.tokenManager = new WebSocketTokenManager(this.vertx);
+            this.authHandler.setTokenManager(this.tokenManager);
             this.webSocketManager = new WebSocketManager(this.authHandler);
             this.router = Router.router(this.vertx);
             this.apiRoutes = new ApiRoutes(this.router, this.authHandler);
@@ -70,6 +73,10 @@ public final class ApiManager {
         }
 
         this.running = false;
+
+        if (this.tokenManager != null) {
+            this.tokenManager.shutdown();
+        }
 
         Future<Void> stopWebSocket = this.webSocketManager != null ? 
             this.webSocketManager.stop() : Future.succeededFuture();

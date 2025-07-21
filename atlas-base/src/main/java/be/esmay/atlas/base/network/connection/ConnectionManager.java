@@ -4,11 +4,14 @@ import be.esmay.atlas.base.AtlasBase;
 import be.esmay.atlas.base.lifecycle.ServerLifecycleService;
 import be.esmay.atlas.base.provider.DeletionOptions;
 import be.esmay.atlas.base.utils.Logger;
+import be.esmay.atlas.common.enums.ServerStatus;
 import be.esmay.atlas.common.enums.ServerType;
 import be.esmay.atlas.common.models.AtlasServer;
+import be.esmay.atlas.common.models.ServerInfo;
 import be.esmay.atlas.common.network.packet.Packet;
 import io.netty.channel.Channel;
 
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -148,9 +151,38 @@ public final class ConnectionManager {
         if (server.getType() == ServerType.DYNAMIC) {
             lifecycleService.removeServer(server, DeletionOptions.connectionLost());
         } else {
-            lifecycleService.stopServer(server);
+            if (server.getServerInfo() != null && 
+                (server.getServerInfo().getStatus() == ServerStatus.STOPPED || 
+                 server.getServerInfo().getStatus() == ServerStatus.STOPPING)) {
+                Logger.debug("Static server {} was manually stopped/stopping, skipping auto-restart", server.getName());
+                return;
+            }
+
+            if (server.getServerInfo() != null) {
+                ServerInfo stoppingInfo = ServerInfo.builder()
+                    .status(ServerStatus.STOPPING)
+                    .onlinePlayers(server.getServerInfo().getOnlinePlayers())
+                    .maxPlayers(server.getServerInfo().getMaxPlayers())
+                    .onlinePlayerNames(server.getServerInfo().getOnlinePlayerNames())
+                    .build();
+                server.updateServerInfo(stoppingInfo);
+                
+                Logger.info("Static server {} disconnected, waiting for container to stop before restart", server.getName());
+
+                if (atlasInstance.getNettyServer() != null) {
+                    atlasInstance.getNettyServer().broadcastServerRemove(server.getServerId(), "Server connection lost");
+                }
+
+                server.setShouldRestartAfterStop(true);
+
+                String containerId = atlasInstance.getProviderManager().getProvider().getContainerIdForServer(server.getServerId());
+                if (containerId != null) {
+                    atlasInstance.getProviderManager().getProvider().waitForContainerStopAndRestart(server, containerId);
+                }
+            }
         }
     }
+
 
     private AtlasServer findServerById(String serverId) {
         AtlasBase atlasInstance = AtlasBase.getInstance();

@@ -1,17 +1,25 @@
 package be.esmay.atlas.base.api;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.vertx.core.Handler;
-import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.RoutingContext;
 import lombok.Getter;
+import lombok.Setter;
+
+import java.util.HashMap;
+import java.util.Map;
 
 @Getter
 public final class ApiAuthHandler {
 
     private final String apiKey;
+    private final ObjectMapper objectMapper;
+    @Setter
+    private WebSocketTokenManager tokenManager;
 
     public ApiAuthHandler(String apiKey) {
         this.apiKey = apiKey;
+        this.objectMapper = new ObjectMapper();
     }
 
     public Handler<RoutingContext> authenticate() {
@@ -29,6 +37,22 @@ public final class ApiAuthHandler {
 
     public boolean isValidToken(String token) {
         return token != null && token.equals(this.apiKey);
+    }
+    
+    public boolean isValidWebSocketToken(String token, String serverId) {
+        if (token == null) {
+            return false;
+        }
+
+        if (token.equals(this.apiKey)) {
+            return true;
+        }
+
+        if (this.tokenManager != null) {
+            return this.tokenManager.validateToken(token, serverId);
+        }
+        
+        return false;
     }
 
     public String extractBearerToken(String authHeader) {
@@ -54,13 +78,21 @@ public final class ApiAuthHandler {
     }
 
     private void sendUnauthorized(RoutingContext context) {
-        JsonObject error = new JsonObject()
-            .put("status", "error")
-            .put("message", "Unauthorized: Invalid or missing API key");
+        Map<String, Object> error = new HashMap<>();
+        error.put("status", "error");
+        error.put("message", "Unauthorized: Invalid or missing API key");
         
-        context.response()
-            .setStatusCode(401)
-            .putHeader("Content-Type", "application/json")
-            .end(error.encode());
+        try {
+            String errorJson = this.objectMapper.writeValueAsString(error);
+            context.response()
+                .setStatusCode(401)
+                .putHeader("Content-Type", "application/json")
+                .end(errorJson);
+        } catch (Exception e) {
+            context.response()
+                .setStatusCode(401)
+                .putHeader("Content-Type", "application/json")
+                .end("{\"status\":\"error\",\"message\":\"Unauthorized\"}");
+        }
     }
 }

@@ -182,6 +182,23 @@ public abstract class ServiceProvider {
     public abstract CompletableFuture<AtlasServer> startServerCompletely(AtlasServer server, StartOptions options);
     
     /**
+     * Gets the container ID for a given server.
+     * 
+     * @param serverId The server ID
+     * @return The container ID or null if not found
+     */
+    public abstract String getContainerIdForServer(String serverId);
+    
+    /**
+     * Waits for a container to stop and then restarts the server if needed.
+     * This is used for static servers that disconnect unexpectedly.
+     * 
+     * @param server The server to monitor
+     * @param containerId The container ID to monitor
+     */
+    public abstract void waitForContainerStopAndRestart(AtlasServer server, String containerId);
+    
+    /**
      * Shuts down the service provider and releases all resources.
      * This method should be called when the application is shutting down.
      */

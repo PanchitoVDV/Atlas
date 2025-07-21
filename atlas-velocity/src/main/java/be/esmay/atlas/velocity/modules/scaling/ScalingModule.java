@@ -51,7 +51,7 @@ public final class ScalingModule extends VelocityModule<AtlasVelocityPlugin> {
         this.cacheManager = new NetworkServerCacheManager();
         this.cacheManager.setProxyServer(this.getPlugin().getProxyServer());
         this.serverInfoManager = new ProxyServerInfoManager(this.getPlugin().getProxyServer());
-        this.registryManager = new VelocityServerRegistryManager(this.getPlugin().getProxyServer());
+        this.registryManager = new VelocityServerRegistryManager(this.getPlugin(), this.getPlugin().getProxyServer());
 
         this.networkClient = new AtlasNetworkClient(
                 atlasHost,
@@ -62,6 +62,7 @@ public final class ScalingModule extends VelocityModule<AtlasVelocityPlugin> {
                 this.serverInfoManager,
                 this.registryManager,
                 this.getPlugin().getProxyServer(),
+                this.getPlugin(),
                 this.getLogger()
         );
 

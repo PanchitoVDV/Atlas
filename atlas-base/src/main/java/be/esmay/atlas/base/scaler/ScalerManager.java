@@ -5,6 +5,7 @@ import be.esmay.atlas.base.config.impl.ScalerConfig;
 import be.esmay.atlas.base.provider.ServiceProvider;
 import be.esmay.atlas.base.scaler.impl.ProxyScaler;
 import be.esmay.atlas.base.utils.Logger;
+import be.esmay.atlas.common.models.AtlasServer;
 import lombok.Getter;
 import org.apache.commons.io.FileUtils;
 
@@ -206,6 +207,29 @@ public final class ScalerManager {
         }
 
         this.scalers.clear();
+    }
+
+    public AtlasServer getServerFromTracking(String serverId) {
+        for (Scaler scaler : this.scalers) {
+            AtlasServer server = scaler.getServer(serverId);
+            if (server != null) {
+                return server;
+            }
+        }
+        return null;
+    }
+
+    public List<AtlasServer> getAllServersFromTracking() {
+        return this.scalers.stream()
+                .flatMap(scaler -> scaler.getServers().stream())
+                .toList();
+    }
+
+    public List<AtlasServer> getServersByGroupFromTracking(String group) {
+        return this.scalers.stream()
+                .filter(scaler -> scaler.getGroupName().equals(group))
+                .flatMap(scaler -> scaler.getServers().stream())
+                .toList();
     }
 
 }

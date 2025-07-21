@@ -4,6 +4,7 @@ import be.esmay.atlas.base.AtlasBase;
 import be.esmay.atlas.base.network.connection.Connection;
 import be.esmay.atlas.base.network.connection.ConnectionManager;
 import be.esmay.atlas.base.network.security.AuthenticationHandler;
+import be.esmay.atlas.base.scaler.Scaler;
 import be.esmay.atlas.base.utils.Logger;
 import be.esmay.atlas.common.enums.ServerStatus;
 import be.esmay.atlas.common.models.AtlasServer;
@@ -177,9 +178,18 @@ public final class AtlasChannelHandler extends SimpleChannelInboundHandler<Packe
 
         AtlasBase atlasInstance = AtlasBase.getInstance();
         if (atlasInstance != null && atlasInstance.getScalerManager() != null) {
-            atlasInstance.getScalerManager().getScalers().forEach(scaler -> {
-                scaler.updateServerInfo(serverId, serverInfo);
-            });
+            boolean found = false;
+            for (Scaler scaler : atlasInstance.getScalerManager().getScalers()) {
+                if (scaler.getServer(serverId) != null) {
+                    scaler.updateServerInfo(serverId, serverInfo);
+                    found = true;
+                    break;
+                }
+            }
+            
+            if (!found) {
+                Logger.debug("Server {} not found in any scaler tracking", serverId);
+            }
         }
     }
 

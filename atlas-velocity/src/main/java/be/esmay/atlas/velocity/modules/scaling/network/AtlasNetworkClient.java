@@ -7,6 +7,7 @@ import be.esmay.atlas.common.network.packet.packets.HandshakePacket;
 import be.esmay.atlas.common.network.packet.packets.HeartbeatPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerInfoUpdatePacket;
 import be.esmay.atlas.common.network.packet.packets.ServerListRequestPacket;
+import be.esmay.atlas.velocity.AtlasVelocityPlugin;
 import be.esmay.atlas.velocity.modules.scaling.cache.NetworkServerCacheManager;
 import be.esmay.atlas.velocity.modules.scaling.proxy.ProxyServerInfoManager;
 import be.esmay.atlas.velocity.modules.scaling.registry.VelocityServerRegistryManager;
@@ -41,6 +42,7 @@ public final class AtlasNetworkClient {
     private final ProxyServerInfoManager serverInfoManager;
     private final VelocityServerRegistryManager registryManager;
     private final ProxyServer proxyServer;
+    private final AtlasVelocityPlugin plugin;
     private final Logger logger;
 
     private final AtomicBoolean connected = new AtomicBoolean(false);
@@ -82,6 +84,7 @@ public final class AtlasNetworkClient {
                             AtlasNetworkClient.this.cacheManager,
                             AtlasNetworkClient.this.registryManager,
                             AtlasNetworkClient.this.proxyServer,
+                            AtlasNetworkClient.this.plugin,
                             AtlasNetworkClient.this.logger
                     );
 

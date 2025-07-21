@@ -50,6 +50,7 @@ public final class LogStreamManager {
     public Future<Void> stopServerLogStream(String serverId) {
         String subscriptionId = this.activeStreams.remove(serverId);
         if (subscriptionId == null) {
+            Logger.debug("No active log stream found for server: " + serverId);
             return Future.succeededFuture();
         }
 
@@ -60,11 +61,11 @@ public final class LogStreamManager {
                 if (success) {
                     Logger.debug("Stopped log streaming for server: " + serverId);
                 } else {
-                    Logger.warn("Failed to stop log streaming for server: " + serverId);
+                    Logger.debug("Log stream was already stopped or not found for server: " + serverId);
                 }
             })
             .exceptionally(throwable -> {
-                Logger.error("Error stopping log streaming for server: " + serverId, throwable);
+                Logger.debug("Error stopping log streaming for server: " + serverId + " - " + throwable.getMessage());
                 return null;
             });
 

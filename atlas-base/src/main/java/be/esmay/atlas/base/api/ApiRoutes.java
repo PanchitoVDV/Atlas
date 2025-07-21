@@ -27,6 +27,7 @@ import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.handler.BodyHandler;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -89,7 +90,9 @@ public final class ApiRoutes {
         this.router.post("/api/v1/servers").handler(this::createServers);
         this.router.post("/api/v1/servers/:id/start").handler(this::startServer);
         this.router.post("/api/v1/servers/:id/stop").handler(this::stopServer);
+        this.router.post("/api/v1/servers/:id/restart").handler(this::restartServer);
         this.router.post("/api/v1/servers/:id/command").handler(this::executeServerCommand);
+        this.router.post("/api/v1/servers/:id/ws/token").handler(this::generateWebSocketToken);
         this.router.delete("/api/v1/servers/:id").handler(this::removeServer);
         this.router.post("/api/v1/groups/:group/scale").handler(this::scaleGroup);
     }
@@ -406,6 +409,12 @@ public final class ApiRoutes {
             server -> AtlasBase.getInstance().getServerManager().stopServer(server));
     }
 
+    private void restartServer(RoutingContext context) {
+        String serverId = context.pathParam("id");
+        this.executeServerAction(context, serverId, "restart", 
+            server -> AtlasBase.getInstance().getServerManager().restartServer(server));
+    }
+
     private void removeServer(RoutingContext context) {
         String serverId = context.pathParam("id");
         this.executeServerAction(context, serverId, "remove", 
@@ -431,6 +440,52 @@ public final class ApiRoutes {
             .thenRun(() -> this.sendResponse(context, ApiResponse.success(null, "Command executed successfully")))
             .exceptionally(throwable -> {
                 this.sendError(context, "Failed to execute command: " + throwable.getMessage());
+                return null;
+            });
+    }
+    
+    private void generateWebSocketToken(RoutingContext context) {
+        String serverId = context.pathParam("id");
+        ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
+        
+        provider.getServer(serverId)
+            .thenAccept(serverOpt -> {
+                if (serverOpt.isEmpty()) {
+                    this.sendError(context, "Server not found: " + serverId, 404);
+                    return;
+                }
+                
+                WebSocketTokenManager tokenManager = this.authHandler.getTokenManager();
+                if (tokenManager == null) {
+                    this.sendError(context, "Token generation not available", 500);
+                    return;
+                }
+                
+                try {
+                    String authHeader = context.request().getHeader("Authorization");
+                    String apiKey = this.authHandler.extractBearerToken(authHeader);
+                    
+                    if (apiKey == null || !this.authHandler.isValidToken(apiKey)) {
+                        this.sendError(context, "Invalid API key", 401);
+                        return;
+                    }
+                    
+                    WebSocketTokenManager.TokenInfo tokenInfo = tokenManager.generateToken(apiKey, serverId);
+                    
+                    Map<String, Object> response = new HashMap<>();
+                    response.put("token", tokenInfo.getToken());
+                    response.put("expiresAt", tokenInfo.getExpiresAt());
+                    
+                    this.sendResponse(context, ApiResponse.success(response));
+                } catch (SecurityException e) {
+                    this.sendError(context, e.getMessage(), 429);
+                } catch (Exception e) {
+                    Logger.error("Failed to generate WebSocket token", e);
+                    this.sendError(context, "Failed to generate token: " + e.getMessage());
+                }
+            })
+            .exceptionally(throwable -> {
+                this.sendError(context, "Failed to check server: " + throwable.getMessage());
                 return null;
             });
     }
@@ -741,6 +796,15 @@ public final class ApiRoutes {
         serverFuture.thenAccept(serverOpt -> {
             if (serverOpt.isEmpty()) {
                 this.sendError(context, "Server not found: " + serverId, 404);
+                return;
+            }
+
+            if (serverOpt.get().getServerInfo() == null || serverOpt.get().getServerInfo().getStatus() == ServerStatus.STOPPED) {
+                Map<String, Object> response = new HashMap<>();
+                response.put("serverId", serverId);
+                response.put("lines", 0);
+                response.put("logs", Collections.emptyList());
+                this.sendResponse(context, ApiResponse.success(response, "Server logs retrieved"));
                 return;
             }
 

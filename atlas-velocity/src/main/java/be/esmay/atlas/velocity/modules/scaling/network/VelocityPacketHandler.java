@@ -1,5 +1,6 @@
 package be.esmay.atlas.velocity.modules.scaling.network;
 
+import be.esmay.atlas.common.enums.ServerStatus;
 import be.esmay.atlas.common.models.AtlasServer;
 import be.esmay.atlas.common.network.packet.Packet;
 import be.esmay.atlas.common.network.packet.PacketHandler;
@@ -14,10 +15,13 @@ import be.esmay.atlas.common.network.packet.packets.ServerListPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerListRequestPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerRemovePacket;
 import be.esmay.atlas.common.network.packet.packets.ServerUpdatePacket;
+import be.esmay.atlas.velocity.AtlasVelocityPlugin;
 import be.esmay.atlas.velocity.modules.scaling.cache.NetworkServerCacheManager;
 import be.esmay.atlas.velocity.modules.scaling.registry.VelocityServerRegistryManager;
+import be.esmay.atlas.velocity.utils.ChatUtils;
 import com.velocitypowered.api.command.CommandManager;
 import com.velocitypowered.api.command.CommandSource;
+import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
@@ -31,6 +35,7 @@ public final class VelocityPacketHandler extends SimpleChannelInboundHandler<Pac
     private final NetworkServerCacheManager cacheManager;
     private final VelocityServerRegistryManager registryManager;
     private final ProxyServer proxyServer;
+    private final AtlasVelocityPlugin plugin;
     private final Logger logger;
 
     @Setter
@@ -90,6 +95,15 @@ public final class VelocityPacketHandler extends SimpleChannelInboundHandler<Pac
     @Override
     public void handleServerUpdate(ServerUpdatePacket packet) {
         this.logger.debug("Server update received: {}", packet.getAtlasServer().getName());
+
+        AtlasServer oldServer = this.cacheManager.getServer(packet.getAtlasServer().getServerId()).orElse(null);
+        if ((oldServer == null && packet.getAtlasServer().getServerInfo().getStatus() == ServerStatus.STARTING) || (oldServer != null && oldServer.getServerInfo().getStatus() != ServerStatus.STARTING && packet.getAtlasServer().getServerInfo().getStatus() == ServerStatus.STARTING)) {
+            for (Player player : this.proxyServer.getAllPlayers()) {
+                if (!player.hasPermission("atlas.notify")) continue;
+
+                player.sendMessage(ChatUtils.format(this.plugin.getMessagesConfiguration().getServerStartingNotification(), packet.getAtlasServer().getName(), "Node-1"));
+            }
+        }
 
         this.cacheManager.updateAtlasServer(packet.getAtlasServer());
     }

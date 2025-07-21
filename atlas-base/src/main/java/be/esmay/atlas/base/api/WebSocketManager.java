@@ -7,6 +7,7 @@ import be.esmay.atlas.base.scaler.Scaler;
 import be.esmay.atlas.base.utils.Logger;
 import be.esmay.atlas.common.models.AtlasServer;
 import be.esmay.atlas.common.models.ServerInfo;
+import be.esmay.atlas.common.models.ServerResourceMetrics;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -18,6 +19,7 @@ import io.vertx.ext.web.RoutingContext;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -57,33 +59,42 @@ public final class WebSocketManager {
         }
 
         ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
-        provider.getServer(serverId)
-            .thenAccept(serverOpt -> {
-                if (serverOpt.isEmpty()) {
-                    context.response().setStatusCode(404).end("Server not found: " + serverId);
-                    return;
-                }
+        String authHeader = context.request().getHeader("Authorization");
+        String token = this.authHandler.extractBearerToken(authHeader);
+        
+        if (token == null) {
+            String queryToken = context.request().getParam("auth");
+            if (queryToken != null) {
+                token = queryToken;
+            }
+        }
 
-                String authHeader = context.request().getHeader("Authorization");
-                String token = this.authHandler.extractBearerToken(authHeader);
-                
-                if (token == null) {
-                    token = this.authHandler.extractTokenFromQuery(context.request().query());
-                }
+        if (!this.authHandler.isValidWebSocketToken(token, serverId)) {
+            context.response().setStatusCode(401).end("Unauthorized");
+            return;
+        }
 
-                if (!this.authHandler.isValidToken(token)) {
-                    context.response().setStatusCode(401).end("Unauthorized");
-                    return;
-                }
-
-                context.request().toWebSocket()
-                    .onSuccess(webSocket -> this.handleWebSocketConnection(webSocket, serverId))
-                    .onFailure(throwable -> Logger.error("Failed to establish WebSocket connection", throwable));
+        context.request().toWebSocket()
+            .onSuccess(webSocket -> {
+                provider.getServer(serverId)
+                    .thenAccept(serverOpt -> {
+                        if (serverOpt.isEmpty()) {
+                            webSocket.close((short) 1002, "Server not found: " + serverId);
+                            return;
+                        }
+                        this.handleWebSocketConnection(webSocket, serverId);
+                    })
+                    .exceptionally(throwable -> {
+                        Logger.error("Error checking server existence after WebSocket upgrade", throwable);
+                        webSocket.close((short) 1011, "Internal server error");
+                        return null;
+                    });
             })
-            .exceptionally(throwable -> {
-                Logger.error("Error checking server existence", throwable);
-                context.response().setStatusCode(500).end("Internal server error");
-                return null;
+            .onFailure(throwable -> {
+                Logger.error("Failed to establish WebSocket connection", throwable);
+                if (!context.response().ended()) {
+                    context.response().setStatusCode(500).end("Failed to establish WebSocket connection");
+                }
             });
     }
 
@@ -107,8 +118,12 @@ public final class WebSocketManager {
         this.sendMessage(connection, WebSocketMessage.authResult(true));
         this.sendServerInfo(connection);
         
-        if (firstConnection && this.logStreamManager != null) {
-            this.logStreamManager.startServerLogStream(serverId);
+        if (firstConnection) {
+            if (this.logStreamManager != null) {
+                this.logStreamManager.startServerLogStream(serverId);
+            }
+
+            this.registerStatusChangeListener(serverId);
         }
     }
 
@@ -143,10 +158,12 @@ public final class WebSocketManager {
 
     private void handleAuth(WebSocketConnection connection, JsonObject message) {
         String token = message.getString("token");
-        boolean valid = this.authHandler.isValidToken(token);
+        String serverId = connection.getServerId();
+        boolean valid = this.authHandler.isValidWebSocketToken(token, serverId);
         
         if (valid) {
             connection.setLastAuth(System.currentTimeMillis());
+            connection.setAuthChallengeTime(0);
         }
         
         this.sendMessage(connection, WebSocketMessage.authResult(valid));
@@ -285,7 +302,8 @@ public final class WebSocketManager {
         
         provider.getServerLogs(serverId, lines)
             .thenAccept(logs -> {
-                JsonObject data = new JsonObject().put("logs", logs);
+                Map<String, Object> data = new HashMap<>();
+                data.put("logs", logs);
                 this.sendMessage(connection, WebSocketMessage.create("logs-history", this.objectMapper.valueToTree(data), serverId));
             })
             .exceptionally(throwable -> {
@@ -353,22 +371,16 @@ public final class WebSocketManager {
             .thenAccept(serverOpt -> {
                 if (serverOpt.isPresent()) {
                     AtlasServer server = serverOpt.get();
-                    JsonObject serverData = new JsonObject();
+                    Map<String, Object> serverData = new HashMap<>();
                     serverData.put("serverId", server.getServerId());
                     serverData.put("name", server.getName());
                     serverData.put("group", server.getGroup());
                     serverData.put("status", server.getServerInfo() != null ? server.getServerInfo().getStatus().toString() : "UNKNOWN");
-                    serverData.put("type", server.getType().toString());
-                    serverData.put("address", server.getAddress());
-                    serverData.put("port", server.getPort());
-                    serverData.put("onlinePlayers", server.getServerInfo() != null ? server.getServerInfo().getOnlinePlayers() : 0);
+                    serverData.put("players", server.getServerInfo() != null ? server.getServerInfo().getOnlinePlayers() : 0);
                     serverData.put("maxPlayers", server.getServerInfo() != null ? server.getServerInfo().getMaxPlayers() : 0);
-                    serverData.put("manuallyScaled", server.isManuallyScaled());
-                    serverData.put("createdAt", server.getCreatedAt());
-                    serverData.put("lastHeartbeat", server.getServerInfo() != null ? server.getLastHeartbeat() : 0);
                     
                     try {
-                        JsonNode serverNode = this.objectMapper.valueToTree(serverData.getMap());
+                        JsonNode serverNode = this.objectMapper.valueToTree(serverData);
                         this.sendMessage(connection, WebSocketMessage.serverInfo(serverNode));
                     } catch (Exception e) {
                         Logger.error("Failed to convert server data to JsonNode", e);
@@ -414,30 +426,28 @@ public final class WebSocketManager {
     }
 
     public void disconnectServerConnections(String serverId, String reason) {
-        for (WebSocketConnection connection : this.connections.values()) {
-            if (connection.getServerId().equals(serverId)) {
-                try {
-                    WebSocketMessage message = WebSocketMessage.error("Server stopped: " + reason);
-                    this.sendMessage(connection, message);
-                    
-                    connection.getWebSocket().close((short) 1000, reason);
-                    Logger.debug("Disconnected WebSocket for stopped server " + serverId + ": " + connection.getId());
-                } catch (Exception e) {
-                    Logger.error("Error disconnecting WebSocket for server " + serverId, e);
+        this.vertx.setTimer(100, timerId -> {
+            for (WebSocketConnection connection : this.connections.values()) {
+                if (connection.getServerId().equals(serverId)) {
+                    try {
+                        WebSocketMessage message = WebSocketMessage.error("Server stopped: " + reason);
+                        this.sendMessage(connection, message);
+                        
+                        connection.getWebSocket().close((short) 1000, reason);
+                        Logger.debug("Disconnected WebSocket for stopped server " + serverId + ": " + connection.getId());
+                    } catch (Exception e) {
+                        Logger.error("Error disconnecting WebSocket for server " + serverId, e);
+                    }
                 }
             }
-        }
+        });
     }
 
     public void handleServerRestartStart(String serverId) {
         WebSocketMessage message = WebSocketMessage.event("restart-started", serverId);
         this.sendToServerConnections(serverId, message);
         
-        if (this.logStreamManager != null) {
-            this.logStreamManager.stopServerLogStream(serverId);
-        }
-        
-        Logger.debug("Stopped log streaming for server restart: " + serverId);
+        Logger.debug("Notified clients about server restart start: " + serverId);
     }
 
     public void stopLogStreamingForRestart(String serverId) {
@@ -484,19 +494,44 @@ public final class WebSocketManager {
     }
 
     private void startPeriodicAuthChallenge() {
-        this.vertx.setPeriodic(300000, timerId -> {
+        this.vertx.setPeriodic(900000, timerId -> {
             long now = System.currentTimeMillis();
             
             for (WebSocketConnection connection : this.connections.values()) {
-                if (now - connection.getLastAuth() > 300000) {
+                long timeSinceLastAuth = now - connection.getLastAuth();
+                if (timeSinceLastAuth > 900000) { // 15 minutes
+                    connection.setAuthChallengeTime(now);
                     this.sendMessage(connection, WebSocketMessage.authChallenge());
+                    Logger.debug("Sent auth challenge to connection " + connection.getId());
+                }
+            }
+        });
+
+        this.vertx.setPeriodic(5000, timerId -> {
+            long now = System.currentTimeMillis();
+            
+            for (WebSocketConnection connection : this.connections.values()) {
+                long authChallengeTime = connection.getAuthChallengeTime();
+                if (authChallengeTime > 0 && now - authChallengeTime > 30000) { // 30 seconds
+                    String connectionId = connection.getId();
+                    Logger.warn("Connection " + connectionId + " failed to respond to auth challenge, disconnecting");
+                    
+                    try {
+                        WebSocketMessage errorMsg = WebSocketMessage.error("Authentication required - no response to auth challenge");
+                        this.sendMessage(connection, errorMsg);
+                        connection.getWebSocket().close((short) 1008, "Authentication timeout");
+                    } catch (Exception e) {
+                        Logger.error("Error closing connection " + connectionId, e);
+                    }
+                    
+                    this.handleDisconnection(connectionId);
                 }
             }
         });
     }
 
     private void startStatsCollection() {
-        this.vertx.setPeriodic(30000, timerId -> this.collectAndBroadcastStats());
+        this.vertx.setPeriodic(5000, timerId -> this.collectAndBroadcastStats());
     }
 
     private void collectAndBroadcastStats() {
@@ -509,44 +544,92 @@ public final class WebSocketManager {
                 .thenAccept(serverOpt -> {
                     if (serverOpt.isPresent()) {
                         AtlasServer server = serverOpt.get();
-                        
-                        provider.getServerStats(serverId)
-                            .thenAccept(serverStats -> {
-                                JsonObject ramObject = new JsonObject();
-                                ramObject.put("used", serverStats.getMemoryUsedBytes() / (1024 * 1024));
-                                ramObject.put("total", serverStats.getMemoryTotalBytes() / (1024 * 1024));
-                                ramObject.put("percentage", serverStats.getMemoryUsagePercent());
-                                
-                                JsonObject diskObject = new JsonObject();
-                                diskObject.put("used", serverStats.getDiskUsedBytes() / (1024 * 1024 * 1024));
-                                diskObject.put("total", serverStats.getDiskTotalBytes() / (1024 * 1024 * 1024));
-                                diskObject.put("percentage", serverStats.getDiskUsagePercent());
-                                
-                                JsonObject networkObject = new JsonObject();
-                                networkObject.put("rx", serverStats.getNetworkRxBytes());
-                                networkObject.put("tx", serverStats.getNetworkTxBytes());
-                                
-                                JsonObject stats = new JsonObject();
-                                stats.put("cpu", serverStats.getCpuUsagePercent());
-                                stats.put("ram", ramObject);
-                                stats.put("disk", diskObject);
-                                stats.put("network", networkObject);
-                                stats.put("players", server.getServerInfo() != null ? server.getServerInfo().getOnlinePlayers() : 0);
-                                stats.put("maxPlayers", server.getServerInfo() != null ? server.getServerInfo().getMaxPlayers() : 0);
-                                stats.put("status", server.getServerInfo() != null ? server.getServerInfo().getStatus().toString() : "UNKNOWN");
-                                stats.put("timestamp", serverStats.getTimestamp());
 
-                                try {
-                                    WebSocketMessage message = WebSocketMessage.create("stats", this.objectMapper.valueToTree(stats));
-                                    this.sendMessage(connection, message);
-                                } catch (Exception e) {
-                                    Logger.error("Failed to send server stats", e);
-                                }
-                            })
-                            .exceptionally(statsThrowable -> {
-                                Logger.error("Failed to get server stats for " + serverId, statsThrowable);
-                                return null;
-                            });
+                        ServerResourceMetrics metrics = AtlasBase.getInstance().getResourceMetricsManager() != null ?
+                            AtlasBase.getInstance().getResourceMetricsManager().getMetrics(serverId) : null;
+                        
+                        if (metrics != null) {
+                            Logger.debug("Using cached metrics for server " + serverId + " - CPU: " + metrics.getCpuUsage() + ", Disk: " + metrics.getDiskUsed());
+                            Map<String, Object> ramData = new HashMap<>();
+                            ramData.put("used", metrics.getMemoryUsed());
+                            ramData.put("total", metrics.getMemoryTotal());
+                            ramData.put("percentage", metrics.getMemoryPercentage());
+                            
+                            Map<String, Object> diskData = new HashMap<>();
+                            diskData.put("used", metrics.getDiskUsed());
+                            diskData.put("total", metrics.getDiskTotal());
+                            diskData.put("percentage", metrics.getDiskPercentage());
+                            
+                            Map<String, Object> networkData = new HashMap<>();
+                            networkData.put("downloadBytes", metrics.getNetworkReceiveBytes());
+                            networkData.put("uploadBytes", metrics.getNetworkSendBytes());
+                            
+                            Map<String, Object> statsData = new HashMap<>();
+                            statsData.put("cpu", metrics.getCpuUsage());
+                            statsData.put("ram", ramData);
+                            statsData.put("disk", diskData);
+                            statsData.put("network", networkData);
+                            statsData.put("players", server.getServerInfo() != null ? server.getServerInfo().getOnlinePlayers() : 0);
+                            statsData.put("maxPlayers", server.getServerInfo() != null ? server.getServerInfo().getMaxPlayers() : 0);
+                            statsData.put("status", server.getServerInfo() != null ? server.getServerInfo().getStatus().toString() : "UNKNOWN");
+
+                            try {
+                                WebSocketMessage message = WebSocketMessage.create("stats", this.objectMapper.valueToTree(statsData));
+                                this.sendMessage(connection, message);
+                            } catch (Exception e) {
+                                Logger.error("Failed to send server stats", e);
+                            }
+                        } else {
+                            Logger.debug("No cached metrics for server " + serverId + ", fetching fresh data");
+                            provider.getServerResourceMetrics(serverId)
+                                .thenAccept(metricsOpt -> {
+                                    if (metricsOpt.isPresent()) {
+                                        ServerResourceMetrics freshMetrics = metricsOpt.get();
+                                        Logger.debug("Fetched fresh metrics for server " + serverId + " - CPU: " + freshMetrics.getCpuUsage() + ", Disk: " + freshMetrics.getDiskUsed());
+
+                                        if (AtlasBase.getInstance().getResourceMetricsManager() != null) {
+                                            AtlasBase.getInstance().getResourceMetricsManager().updateMetrics(serverId, freshMetrics);
+                                            server.updateResourceMetrics(freshMetrics);
+                                        }
+                                        
+                                        Map<String, Object> ramData = new HashMap<>();
+                                        ramData.put("used", freshMetrics.getMemoryUsed());
+                                        ramData.put("total", freshMetrics.getMemoryTotal());
+                                        ramData.put("percentage", freshMetrics.getMemoryPercentage());
+                                        
+                                        Map<String, Object> diskData = new HashMap<>();
+                                        diskData.put("used", freshMetrics.getDiskUsed());
+                                        diskData.put("total", freshMetrics.getDiskTotal());
+                                        diskData.put("percentage", freshMetrics.getDiskPercentage());
+                                        
+                                        Map<String, Object> networkData = new HashMap<>();
+                                        networkData.put("downloadBytes", freshMetrics.getNetworkReceiveBytes());
+                                        networkData.put("uploadBytes", freshMetrics.getNetworkSendBytes());
+                                        
+                                        Map<String, Object> statsData = new HashMap<>();
+                                        statsData.put("cpu", freshMetrics.getCpuUsage());
+                                        statsData.put("ram", ramData);
+                                        statsData.put("disk", diskData);
+                                        statsData.put("network", networkData);
+                                        statsData.put("players", server.getServerInfo() != null ? server.getServerInfo().getOnlinePlayers() : 0);
+                                        statsData.put("maxPlayers", server.getServerInfo() != null ? server.getServerInfo().getMaxPlayers() : 0);
+                                        statsData.put("status", server.getServerInfo() != null ? server.getServerInfo().getStatus().toString() : "UNKNOWN");
+
+                                        try {
+                                            WebSocketMessage message = WebSocketMessage.create("stats", this.objectMapper.valueToTree(statsData));
+                                            this.sendMessage(connection, message);
+                                        } catch (Exception e) {
+                                            Logger.error("Failed to send server stats", e);
+                                        }
+                                    } else {
+                                        Logger.debug("No metrics available for server " + serverId);
+                                    }
+                                })
+                                .exceptionally(throwable -> {
+                                    Logger.error("Failed to get server resource metrics for " + serverId, throwable);
+                                    return null;
+                                });
+                        }
                     }
                 })
                 .exceptionally(throwable -> {
@@ -565,6 +648,39 @@ public final class WebSocketManager {
         if (this.logStreamManager != null) {
             this.logStreamManager.broadcastServerEvent(serverId, event);
         }
+    }
+    
+    public void broadcastServerStatusUpdate(String serverId, String status) {
+        Map<String, Object> statusData = new HashMap<>();
+        statusData.put("serverId", serverId);
+        statusData.put("status", status);
+        statusData.put("timestamp", System.currentTimeMillis());
+        
+        try {
+            WebSocketMessage message = WebSocketMessage.create("status-update", this.objectMapper.valueToTree(statusData), serverId);
+            this.sendToServerConnections(serverId, message);
+            Logger.debug("Broadcast status update for server " + serverId + ": " + status);
+        } catch (Exception e) {
+            Logger.error("Failed to broadcast status update for server " + serverId, e);
+        }
+    }
+    
+    private void registerStatusChangeListener(String serverId) {
+        ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
+        provider.getServer(serverId)
+            .thenAccept(serverOpt -> {
+                if (serverOpt.isPresent()) {
+                    AtlasServer server = serverOpt.get();
+                    server.setStatusChangeListener((id, status) -> {
+                        this.broadcastServerStatusUpdate(id, status.toString());
+                    });
+                    Logger.debug("Registered status change listener for server " + serverId);
+                }
+            })
+            .exceptionally(throwable -> {
+                Logger.error("Failed to register status change listener for server " + serverId, throwable);
+                return null;
+            });
     }
 
     public Future<Void> stop() {
@@ -588,6 +704,8 @@ public final class WebSocketManager {
 
         @Setter
         private volatile long lastAuth;
+        @Setter
+        private volatile long authChallengeTime;
         private volatile Set<String> subscribedStreams = new HashSet<>();
         private volatile Set<String> subscribedTargets = new HashSet<>();
 
@@ -596,6 +714,7 @@ public final class WebSocketManager {
             this.webSocket = webSocket;
             this.lastAuth = lastAuth;
             this.serverId = serverId;
+            this.authChallengeTime = 0;
         }
 
         public void setSubscriptions(JsonNode streams, JsonNode targets) {

@@ -36,6 +36,13 @@ public final class AtlasVelocityAPI {
         }
         return AtlasVelocityAPI.cacheManager.getServer(serverId);
     }
+
+    public static Optional<AtlasServer> getServerByName(String serverName) {
+        if (!AtlasVelocityAPI.initialized) {
+            return Optional.empty();
+        }
+        return AtlasVelocityAPI.cacheManager.getServerByName(serverName);
+    }
     
     public static Collection<AtlasServer> getAllServers() {
         if (!AtlasVelocityAPI.initialized) {

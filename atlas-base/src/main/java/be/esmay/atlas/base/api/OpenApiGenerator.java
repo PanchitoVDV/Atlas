@@ -82,6 +82,7 @@ public final class OpenApiGenerator {
         paths.addPathItem("/api/v1/servers/{id}/start", createServerActionPath("start"));
         paths.addPathItem("/api/v1/servers/{id}/stop", createServerActionPath("stop"));
         paths.addPathItem("/api/v1/servers/{id}/command", createServerCommandPath());
+        paths.addPathItem("/api/v1/servers/{id}/ws/token", createWebSocketTokenPath());
         paths.addPathItem("/api/v1/groups", createGroupsPath());
         paths.addPathItem("/api/v1/groups/{name}", createGroupByNamePath());
         paths.addPathItem("/api/v1/groups/{group}/scale", createScalePath());
@@ -793,7 +794,7 @@ public final class OpenApiGenerator {
                 .description("Establishes a WebSocket connection for real-time communication with a specific server. " +
                     "Supports live log streaming, server control, and real-time statistics. " +
                     "\n\n**Outbound Message Types (Client to Server):**\n" +
-                    "- `auth` - Authenticate with token: `{\"type\": \"auth\", \"token\": \"your-api-key\"}`\n" +
+                    "- `auth` - Authenticate with token: `{\"type\": \"auth\", \"token\": \"your-api-key-or-temp-token\"}`\n" +
                     "- `subscribe` - Subscribe to streams: `{\"type\": \"subscribe\", \"streams\": [\"logs\", \"stats\", \"events\"], \"targets\": [\"serverId\", \"global\"]}`\n" +
                     "- `server-start` - Start server: `{\"type\": \"server-start\"}`\n" +
                     "- `server-stop` - Stop server: `{\"type\": \"server-stop\"}`\n" +
@@ -805,14 +806,15 @@ public final class OpenApiGenerator {
                     "- `get-logs-history` - Get log history: `{\"type\": \"get-logs-history\", \"serverId\": \"abc123\", \"lines\": 20}`\n" +
                     "\n**Inbound Message Types (Server to Client):**\n" +
                     "- `log` - Live log line: `{\"type\": \"log\", \"message\": \"[INFO] Player joined\", \"serverId\": \"abc123\", \"timestamp\": 1752700258719}`\n" +
-                    "- `stats` - Server statistics: `{\"type\": \"stats\", \"data\": {\"cpu\": 15.2, \"ram\": {\"used\": 512, \"total\": 1024, \"percentage\": 50}, \"disk\": {...}, \"network\": {...}, \"players\": 5, \"maxPlayers\": 75, \"status\": \"RUNNING\"}, \"timestamp\": 1752700258719}`\n" +
+                    "- `stats` - Server statistics: `{\"type\": \"stats\", \"data\": {\"cpu\": 15.2, \"ram\": {\"used\": 512, \"total\": 1024, \"percentage\": 50}, \"disk\": {\"used\": 1073741824, \"total\": 10737418240, \"percentage\": 10}, \"network\": {\"uploadBytes\": 148343, \"downloadBytes\": 1278504}, \"players\": 5, \"maxPlayers\": 75, \"status\": \"RUNNING\"}, \"timestamp\": 1752700258719}`\n" +
                     "- `server-info` - Server details on connect: `{\"type\": \"server-info\", \"data\": {\"serverId\": \"abc123\", \"name\": \"lobby-1\", \"group\": \"Lobby\", \"status\": \"RUNNING\", ...}, \"timestamp\": 1752700258719}`\n" +
                     "- `command-result` - Command execution result: `{\"type\": \"command-result\", \"commandId\": \"cmd123\", \"message\": \"Command executed successfully\", \"timestamp\": 1752700258719}`\n" +
                     "- `event` - Server events: `{\"type\": \"event\", \"message\": \"restart-started\", \"serverId\": \"abc123\", \"timestamp\": 1752700258719}`\n" +
+                    "- `status-update` - Live status changes: `{\"type\": \"status-update\", \"data\": {\"serverId\": \"abc123\", \"status\": \"RUNNING\", \"timestamp\": 1752700258719}, \"serverId\": \"abc123\", \"timestamp\": 1752700258719}`\n" +
                     "- `logs-history` - Historical logs: `{\"type\": \"logs-history\", \"data\": {\"logs\": [\"log1\", \"log2\"]}, \"serverId\": \"abc123\", \"timestamp\": 1752700258719}`\n" +
                     "- `subscribe-result` - Subscription confirmation: `{\"type\": \"subscribe-result\", \"message\": \"Subscriptions updated\", \"timestamp\": 1752700258719}`\n" +
                     "- `auth-result` - Authentication result: `{\"type\": \"auth-result\", \"message\": \"Authentication successful\", \"timestamp\": 1752700258719}`\n" +
-                    "- `auth-challenge` - Periodic re-auth: `{\"type\": \"auth-challenge\", \"timestamp\": 1752700258719}`\n" +
+                    "- `auth-challenge` - Periodic re-auth challenge (every 15 minutes): `{\"type\": \"auth-challenge\", \"timestamp\": 1752700258719}`\n" +
                     "- `error` - Error message: `{\"type\": \"error\", \"message\": \"Command failed\", \"timestamp\": 1752700258719}`")
                 .addTagsItem("WebSocket")
                 .addParametersItem(serverIdParam)
@@ -831,6 +833,36 @@ public final class OpenApiGenerator {
                         .description("Unauthorized - invalid or missing API key"))
                     .addApiResponse("404", new ApiResponse()
                         .description("Server not found"))));
+    }
+    
+    private static PathItem createWebSocketTokenPath() {
+        Parameter serverIdParam = new Parameter()
+            .name("id")
+            .in("path")
+            .description("Server ID")
+            .required(true)
+            .style(Parameter.StyleEnum.SIMPLE)
+            .explode(false)
+            .schema(new StringSchema());
+
+        return new PathItem()
+            .post(new Operation()
+                .operationId("generateWebSocketToken")
+                .summary("Generate WebSocket token")
+                .description("Generates a temporary authentication token for WebSocket connections. Token is valid for 15 minutes and tied to the specific server.")
+                .addTagsItem("WebSocket")
+                .addSecurityItem(new SecurityRequirement().addList("bearerAuth"))
+                .addParametersItem(serverIdParam)
+                .responses(createStandardResponses()
+                    .addApiResponse("200", new ApiResponse()
+                        .description("Token generated successfully")
+                        .content(new Content()
+                            .addMediaType("application/json", new MediaType()
+                                .schema(new Schema<>().$ref("#/components/schemas/WebSocketTokenResponse")))))
+                    .addApiResponse("404", new ApiResponse()
+                        .description("Server not found"))
+                    .addApiResponse("429", new ApiResponse()
+                        .description("Rate limit exceeded (max 10 tokens per minute per API key)"))));
     }
 
     private static ApiResponses createStandardResponses() {
@@ -1054,6 +1086,13 @@ public final class OpenApiGenerator {
                     .addProperty("path", new StringSchema().example("/plugins"))
                     .addProperty("files", new ArraySchema()
                         .items(new Schema<>().$ref("#/components/schemas/FileInfo"))))
+                .addProperty("timestamp", new Schema<>().type("integer").format("int64").example(1752700258719L))),
+            
+            Map.entry("WebSocketTokenResponse", new ObjectSchema()
+                .addProperty("status", new StringSchema().example("success"))
+                .addProperty("data", new ObjectSchema()
+                    .addProperty("token", new StringSchema().example("dGVtcC10b2tlbi1oZXJl"))
+                    .addProperty("expiresAt", new Schema<>().type("integer").format("int64").example(1752701158719L)))
                 .addProperty("timestamp", new Schema<>().type("integer").format("int64").example(1752700258719L)))
         );
     }

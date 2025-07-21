@@ -3,6 +3,8 @@ package be.esmay.atlas.velocity.modules.scaling.registry;
 import be.esmay.atlas.common.enums.ServerStatus;
 import be.esmay.atlas.common.models.AtlasServer;
 import be.esmay.atlas.velocity.AtlasVelocityPlugin;
+import be.esmay.atlas.velocity.utils.ChatUtils;
+import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
 import com.velocitypowered.api.proxy.server.RegisteredServer;
 import com.velocitypowered.api.proxy.server.ServerInfo;
@@ -16,8 +18,8 @@ import java.util.concurrent.ConcurrentHashMap;
 @RequiredArgsConstructor
 public final class VelocityServerRegistryManager {
 
+    private final AtlasVelocityPlugin plugin;
     private final ProxyServer proxyServer;
-    private final Set<String> managedServers = ConcurrentHashMap.newKeySet();
 
     public void handleAtlasServerAdd(AtlasServer atlasServer) {
         if (this.isProxyServer(atlasServer) || atlasServer.getServerInfo() == null || atlasServer.getServerInfo().getStatus() != ServerStatus.RUNNING)
@@ -39,7 +41,6 @@ public final class VelocityServerRegistryManager {
             return;
         }
 
-        if (this.managedServers.contains(atlasServer.getName())) return;
         this.addServerToVelocity(atlasServer);
     }
 
@@ -52,9 +53,14 @@ public final class VelocityServerRegistryManager {
             ServerInfo velocityServerInfo = new ServerInfo(serverName, address);
 
             this.proxyServer.registerServer(velocityServerInfo);
-            this.managedServers.add(serverName);
 
             AtlasVelocityPlugin.getInstance().getLogger().info("Registered server in Velocity: {} at {}", atlasServer.getName(), address);
+
+            for (Player player : this.proxyServer.getAllPlayers()) {
+                if (!player.hasPermission("atlas.notify")) continue;
+
+                player.sendMessage(ChatUtils.format(this.plugin.getMessagesConfiguration().getServerStartedNotification(), atlasServer.getName(), "Node-1"));
+            }
             return;
         }
 
@@ -75,13 +81,18 @@ public final class VelocityServerRegistryManager {
     private void removeServerFromVelocity(String serverName) {
         Optional<RegisteredServer> server = this.proxyServer.getServer(serverName);
 
-        if (server.isEmpty() || !this.managedServers.contains(serverName))
+        if (server.isEmpty())
             return;
 
         this.proxyServer.unregisterServer(server.get().getServerInfo());
-        this.managedServers.remove(serverName);
 
         AtlasVelocityPlugin.getInstance().getLogger().info("Unregistered server in Velocity: {}", serverName);
+
+        for (Player player : this.proxyServer.getAllPlayers()) {
+            if (!player.hasPermission("atlas.notify")) continue;
+
+            player.sendMessage(ChatUtils.format(this.plugin.getMessagesConfiguration().getServerStoppedNotification(), serverName, "Node-1"));
+        }
     }
 
     private boolean isProxyServer(AtlasServer atlasServer) {

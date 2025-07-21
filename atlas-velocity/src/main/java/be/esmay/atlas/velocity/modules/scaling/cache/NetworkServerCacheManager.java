@@ -43,6 +43,12 @@ public final class NetworkServerCacheManager {
         return Optional.ofNullable(this.serverCache.get(serverId));
     }
 
+    public Optional<AtlasServer> getServerByName(String serverName) {
+        return this.serverCache.values().stream()
+                .filter(server -> server.getName().equalsIgnoreCase(serverName))
+                .findFirst();
+    }
+
     public Collection<AtlasServer> getAllServers() {
         return this.serverCache.values();
     }

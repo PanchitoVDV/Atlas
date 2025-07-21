@@ -60,7 +60,7 @@ public final class StartOptions {
             .prepareDirectory(true)
             .applyTemplates(true)
             .validateResources(true)
-            .waitForReady(true)
+            .waitForReady(false)
             .cleanupOnFailure(true)
             .build();
     }
@@ -88,7 +88,7 @@ public final class StartOptions {
             .prepareDirectory(false)
             .applyTemplates(true)
             .validateResources(true)
-            .waitForReady(true)
+            .waitForReady(false)
             .cleanupOnFailure(false)
             .build();
     }

@@ -1,5 +1,7 @@
 package be.esmay.atlas.velocity;
 
+import be.esmay.atlas.velocity.utils.DefaultConfiguration;
+import be.esmay.atlas.velocity.utils.MessagesConfiguration;
 import com.google.inject.Inject;
 import com.jazzkuh.modulemanager.velocity.IVelocityPlugin;
 import com.jazzkuh.modulemanager.velocity.VelocityModuleManager;
@@ -34,6 +36,9 @@ public final class AtlasVelocityPlugin implements IVelocityPlugin {
     private final Logger logger;
     private final Path dataDirectory;
 
+    private final DefaultConfiguration defaultConfiguration;
+    private final MessagesConfiguration messagesConfiguration;
+
     @Inject
     public AtlasVelocityPlugin(ProxyServer proxyServer, Logger logger, @DataDirectory Path dataDirectory) {
         instance = this;
@@ -41,6 +46,9 @@ public final class AtlasVelocityPlugin implements IVelocityPlugin {
         this.proxyServer = proxyServer;
         this.logger = logger;
         this.dataDirectory = dataDirectory;
+
+        this.defaultConfiguration = new DefaultConfiguration(this.dataDirectory);
+        this.messagesConfiguration = new MessagesConfiguration(this.dataDirectory);
 
         moduleManager = new VelocityModuleManager<>(this, this.logger);
         moduleManager.scanModules(getClass());

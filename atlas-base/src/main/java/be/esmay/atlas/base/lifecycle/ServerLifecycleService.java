@@ -12,6 +12,9 @@ import be.esmay.atlas.base.utils.Logger;
 import be.esmay.atlas.common.enums.ServerStatus;
 import be.esmay.atlas.common.enums.ServerType;
 import be.esmay.atlas.common.models.AtlasServer;
+import be.esmay.atlas.common.models.ServerInfo;
+
+import java.util.HashSet;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -34,6 +37,25 @@ public final class ServerLifecycleService {
      * @return CompletableFuture that completes when the server is started
      */
     public CompletableFuture<Void> startServer(AtlasServer server) {
+        if (server.getServerInfo() != null) {
+            ServerInfo startingInfo = ServerInfo.builder()
+                .status(ServerStatus.STARTING)
+                .onlinePlayers(0)
+                .maxPlayers(server.getServerInfo().getMaxPlayers())
+                .onlinePlayerNames(new HashSet<>())
+                .build();
+            server.updateServerInfo(startingInfo);
+        }
+
+        server.setLastHeartbeat(System.currentTimeMillis());
+        server.getServerInfo().setStatus(ServerStatus.STARTING);
+        server.updateServerInfo(server.getServerInfo());
+
+        Scaler scaler = this.atlasBase.getScalerManager().getScaler(server.getGroup());
+        if (scaler != null) {
+            scaler.clearManualStopFlag(server.getServerId());
+        }
+
         ServiceProvider provider = this.atlasBase.getProviderManager().getProvider();
 
         return provider.startServerCompletely(server, StartOptions.userCommand())
@@ -64,27 +86,32 @@ public final class ServerLifecycleService {
             return this.removeServer(server, DeletionOptions.userCommand());
         }
 
-        Logger.debug("Detected STATIC server {}, using unified deletion with stop-only mode", server.getName());
-
-        DeletionOptions staticStopOptions = DeletionOptions.builder()
-                .reason(DeletionReason.USER_COMMAND)
-                .gracefulStop(true)
-                .cleanupDirectory(false)
-                .removeFromTracking(false)
-                .build();
+        Logger.debug("Detected STATIC server {}, using stop-only mode (container will remain)", server.getName());
 
         ServiceProvider provider = this.atlasBase.getProviderManager().getProvider();
 
-        return provider.deleteServerCompletely(server, staticStopOptions)
-                .thenAccept(success -> {
-                    if (success) {
-                        Logger.info("Successfully stopped STATIC server: {}", server.getName());
-                        server.setShutdown(false);
-                        this.cleanupServerResources(server);
-                        this.notifyServerUpdate(server);
-                    } else {
-                        Logger.error("Failed to stop STATIC server: {}", server.getName());
+        if (server.getServerInfo() != null) {
+            ServerInfo stoppingInfo = ServerInfo.builder()
+                .status(ServerStatus.STOPPING)
+                .onlinePlayers(server.getServerInfo().getOnlinePlayers())
+                .maxPlayers(server.getServerInfo().getMaxPlayers())
+                .onlinePlayerNames(server.getServerInfo().getOnlinePlayerNames())
+                .build();
+            server.updateServerInfo(stoppingInfo);
+        }
+
+        Scaler scaler = this.atlasBase.getScalerManager().getScaler(server.getGroup());
+        if (scaler != null) {
+            scaler.markServerAsManuallyStopped(server.getServerId());
+        }
+
+        return provider.stopServer(server)
+                .thenAccept(v -> {
+                    if (this.atlasBase.getNettyServer() != null) {
+                        this.atlasBase.getNettyServer().broadcastServerRemove(server.getServerId(), "Static server manually stopped");
                     }
+                    
+                    server.setShutdown(false);
                 })
                 .exceptionally(throwable -> {
                     Logger.error("Failed to stop STATIC server: {}", server.getName(), throwable);
@@ -121,6 +148,21 @@ public final class ServerLifecycleService {
 
         Logger.debug("Starting deletion for server: {} with options: {}", server.getName(), options.getReason());
 
+        if (server.getServerInfo() != null) {
+            ServerInfo stoppingInfo = ServerInfo.builder()
+                .status(ServerStatus.STOPPING)
+                .onlinePlayers(server.getServerInfo().getOnlinePlayers())
+                .maxPlayers(server.getServerInfo().getMaxPlayers())
+                .onlinePlayerNames(server.getServerInfo().getOnlinePlayerNames())
+                .build();
+            server.updateServerInfo(stoppingInfo);
+
+            if (this.atlasBase.getNettyServer() != null) {
+                this.atlasBase.getNettyServer().broadcastServerUpdate(server);
+                Logger.debug("Broadcasted STOPPING status for server {} before deletion", server.getName());
+            }
+        }
+
         return provider.deleteServerCompletely(server, options)
                 .thenAccept(success -> {
                     if (success) {
@@ -129,7 +171,7 @@ public final class ServerLifecycleService {
                         }
 
                         Logger.debug("Successfully removed server: {} (reason: {})", server.getName(), options.getReason());
-                        this.cleanupServerResources(server);
+
                         this.notifyServerRemoval(server);
                     } else {
                         Logger.error("Unified deletion reported failure for server: {}", server.getName());
@@ -143,7 +185,7 @@ public final class ServerLifecycleService {
                         Logger.warn("Ensured server {} tracking removal after unified deletion failure", server.getName());
                     }
 
-                    this.cleanupServerResources(server);
+                    this.cleanupServerResourcesAfterStop(server);
 
                     return null;
                 });
@@ -170,9 +212,35 @@ public final class ServerLifecycleService {
         WebSocketManager webSocketManager = this.atlasBase.getApiManager().getWebSocketManager();
         webSocketManager.handleServerRestartStart(server.getServerId());
 
-        return provider.startServerCompletely(server, StartOptions.restart())
+        scaler.markServerAsRestarting(server.getServerId());
+
+        CompletableFuture<Void> stopFuture;
+        if (server.getServerInfo() != null && server.getServerInfo().getStatus() == ServerStatus.STOPPED) {
+            Logger.debug("Server {} is already stopped, proceeding directly to start", server.getName());
+            stopFuture = CompletableFuture.completedFuture(null);
+        } else {
+            stopFuture = this.stopServer(server);
+        }
+        
+        return stopFuture.thenCompose(v -> {
+            Logger.debug("Server stopped, now restarting: {}", server.getName());
+
+            if (server.getServerInfo() != null) {
+                ServerInfo startingInfo = ServerInfo.builder()
+                    .status(ServerStatus.STARTING)
+                    .onlinePlayers(0)
+                    .maxPlayers(server.getServerInfo().getMaxPlayers())
+                    .onlinePlayerNames(new HashSet<>())
+                    .build();
+                server.updateServerInfo(startingInfo);
+            }
+            
+            return provider.startServerCompletely(server, StartOptions.restart());
+                })
                 .thenAccept(restartedServer -> {
                     Logger.debug("Successfully restarted server: " + restartedServer.getName());
+
+                    scaler.clearRestartFlag(server.getServerId());
 
                     WebSocketMessage restartMessage = WebSocketMessage.event("restart-completed", server.getServerId());
                     webSocketManager.sendToServerConnections(server.getServerId(), restartMessage);
@@ -181,16 +249,21 @@ public final class ServerLifecycleService {
                 })
                 .exceptionally(throwable -> {
                     Logger.error("Failed to restart server: " + server.getName(), throwable);
+                    
+                    // Clear restart flag even on failure
+                    scaler.clearRestartFlag(server.getServerId());
+                    
                     return null;
                 });
     }
 
     /**
-     * Cleans up server resources (WebSocket connections, log streams, etc.).
+     * Cleans up server resources (WebSocket connections, log streams, etc.) after server stop.
+     * Public method for use by Docker provider after container stop is confirmed.
      *
      * @param server The server to clean up
      */
-    private void cleanupServerResources(AtlasServer server) {
+    public void cleanupServerResourcesAfterStop(AtlasServer server) {
         try {
             WebSocketManager webSocketManager = this.atlasBase.getApiManager().getWebSocketManager();
 
