@@ -1,6 +1,8 @@
 package be.esmay.atlas.base.backup;
 
 import be.esmay.atlas.base.AtlasBase;
+import be.esmay.atlas.base.activity.ActivityService;
+import be.esmay.atlas.base.activity.ActivityType;
 import be.esmay.atlas.base.config.impl.AtlasConfig;
 import be.esmay.atlas.base.config.impl.ScalerConfig;
 import be.esmay.atlas.base.utils.Logger;
@@ -37,6 +39,7 @@ public final class BackupManager {
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     
     private S3BackupUploader s3Uploader;
+    private ActivityService activityService;
 
     private S3BackupUploader getS3Uploader() {
         if (this.s3Uploader == null) {
@@ -45,10 +48,18 @@ public final class BackupManager {
         }
         return this.s3Uploader;
     }
+    
+    private ActivityService getActivityService() {
+        if (this.activityService == null) {
+            this.activityService = AtlasBase.getInstance().getActivityService();
+        }
+        return this.activityService;
+    }
 
     public CompletableFuture<Void> executeServerBackup(AtlasServer server, ScalerConfig.BackupAction backupAction, String jobName) {
         return CompletableFuture.runAsync(() -> {
             Logger.debug("Backup started for server: {} (job: {})", server.getName(), jobName);
+            long startTime = System.currentTimeMillis();
             try {
                 String serverDirectory = server.getWorkingDirectory();
                 if (serverDirectory == null || serverDirectory.isEmpty()) {
@@ -89,9 +100,34 @@ public final class BackupManager {
                     this.getS3Uploader().cleanupOldBackups(backupAction.getS3Bucket(), resolvedPath, server.getServerId(), backupAction.getS3Retention());
                 }
 
+                long duration = (System.currentTimeMillis() - startTime) / 1000;
+                long backupSize = Files.size(backupFile);
+                
+                this.getActivityService().createActivity(ActivityType.BACKUP_OPERATION)
+                    .serverId(server.getServerId())
+                    .serverName(server.getName())
+                    .groupName(server.getGroup())
+                    .triggeredBy("cron")
+                    .description(String.format("Backup completed for server %s (job: %s)", server.getName(), jobName))
+                    .backupDetails(backupSize, (int) duration, backupAction.getCompressionFormat().toString())
+                    .metadata("job_name", jobName)
+                    .metadata("backup_file", backupFile.toString())
+                    .metadata("s3_upload", backupAction.isUploadToS3())
+                    .record();
+
                 Logger.debug("Backup completed successfully for server: {} (job: {})", server.getName(), jobName);
 
             } catch (Exception e) {
+                this.getActivityService().createActivity(ActivityType.BACKUP_OPERATION)
+                    .serverId(server.getServerId())
+                    .serverName(server.getName())
+                    .groupName(server.getGroup())
+                    .triggeredBy("cron")
+                    .description(String.format("Backup failed for server %s (job: %s): %s", server.getName(), jobName, e.getMessage()))
+                    .metadata("job_name", jobName)
+                    .metadata("error", e.getMessage())
+                    .record();
+                
                 Logger.error("Failed to backup server {}: {}", server.getName(), e.getMessage(), e);
             }
         });

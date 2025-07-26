@@ -48,6 +48,10 @@ public abstract class Scaler {
     protected volatile boolean shutdown = false;
     protected volatile boolean paused = false;
     protected volatile Instant lastScaleUpTime = Instant.MIN;
+    
+    private final Map<String, Integer> lastPlayerCounts = new ConcurrentHashMap<>();
+    private static final int PLAYER_SURGE_THRESHOLD = 10;
+    private static final int PLAYER_DROP_THRESHOLD = 10;
     protected volatile Instant lastScaleDownTime = Instant.MIN;
 
     public Scaler(String groupName, ScalerConfig scalerConfig) {
@@ -634,8 +638,11 @@ public abstract class Scaler {
 
 
         ServerStatus oldStatus = server.getServerInfo() != null ? server.getServerInfo().getStatus() : null;
+        int oldPlayerCount = server.getServerInfo() != null ? server.getServerInfo().getOnlinePlayers() : 0;
         server.setServerInfo(serverInfo);
         server.setLastHeartbeat(System.currentTimeMillis());
+        
+        this.checkPlayerCountChanges(serverId, oldPlayerCount, serverInfo.getOnlinePlayers(), server);
 
 
         ServerStatus newStatus = serverInfo.getStatus();
@@ -959,6 +966,56 @@ public abstract class Scaler {
         }
         this.scalerConfig.getGroup().getScaling().getConditions().setScaleDownThreshold(threshold);
         Logger.debug("Updated scale down threshold to {} for group {}", threshold, this.groupName);
+    }
+    
+    private void checkPlayerCountChanges(String serverId, int oldCount, int newCount, AtlasServer server) {
+        Integer lastKnownCount = this.lastPlayerCounts.get(serverId);
+        this.lastPlayerCounts.put(serverId, newCount);
+        
+        if (lastKnownCount == null) {
+            return;
+        }
+        
+        int playerDifference = newCount - lastKnownCount;
+        
+        if (playerDifference >= PLAYER_SURGE_THRESHOLD) {
+            AtlasBase.getInstance().getActivityService().createActivity(ActivityType.PLAYER_SURGE)
+                .serverId(serverId)
+                .serverName(server.getName())
+                .groupName(this.groupName)
+                .triggeredBy("automatic")
+                .description(String.format("Player surge detected on server %s: %d → %d players (+%d)", 
+                    server.getName(), lastKnownCount, newCount, playerDifference))
+                .playerDetails(lastKnownCount, newCount, server.getServerInfo() != null ? server.getServerInfo().getMaxPlayers() : 20)
+                .metadata("surge_amount", playerDifference)
+                .metadata("threshold", PLAYER_SURGE_THRESHOLD)
+                .record();
+        } else if (playerDifference <= -PLAYER_DROP_THRESHOLD) {
+            AtlasBase.getInstance().getActivityService().createActivity(ActivityType.PLAYER_DROP)
+                .serverId(serverId)
+                .serverName(server.getName())
+                .groupName(this.groupName)
+                .triggeredBy("automatic")
+                .description(String.format("Player drop detected on server %s: %d → %d players (%d)", 
+                    server.getName(), lastKnownCount, newCount, playerDifference))
+                .playerDetails(lastKnownCount, newCount, server.getServerInfo() != null ? server.getServerInfo().getMaxPlayers() : 20)
+                .metadata("drop_amount", Math.abs(playerDifference))
+                .metadata("threshold", PLAYER_DROP_THRESHOLD)
+                .record();
+        }
+        
+        if (newCount >= (server.getServerInfo() != null ? server.getServerInfo().getMaxPlayers() : 20)) {
+            AtlasBase.getInstance().getActivityService().createActivity(ActivityType.CAPACITY_REACHED)
+                .serverId(serverId)
+                .serverName(server.getName())
+                .groupName(this.groupName)
+                .triggeredBy("automatic")
+                .description(String.format("Server %s reached capacity: %d/%d players", 
+                    server.getName(), newCount, server.getServerInfo() != null ? server.getServerInfo().getMaxPlayers() : 20))
+                .playerDetails(lastKnownCount, newCount, server.getServerInfo() != null ? server.getServerInfo().getMaxPlayers() : 20)
+                .metadata("capacity_reached", true)
+                .record();
+        }
     }
 
 }
