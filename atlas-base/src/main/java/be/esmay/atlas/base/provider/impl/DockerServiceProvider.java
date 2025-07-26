@@ -409,7 +409,20 @@ public final class DockerServiceProvider extends ServiceProvider {
 
         if (containerId == null) {
             Logger.warn("Container ID not found for server: {} - assuming already deleted", containerName);
-            return new DeletionContext(serverId, null, containerName, false, false, null);
+            
+            boolean shouldCleanupDirectory = false;
+            String volumePath = null;
+            
+            if (server.getType() == ServerType.DYNAMIC && options.isCleanupDirectory() && options.getReason() != DeletionReason.SERVER_RESTART && server.getWorkingDirectory() != null) {
+                shouldCleanupDirectory = true;
+                volumePath = server.getWorkingDirectory();
+                if (!volumePath.startsWith("/")) {
+                    volumePath = System.getProperty("user.dir") + "/" + volumePath;
+                }
+                Logger.debug("Enabling directory cleanup for dynamic server {} (container already gone)", server.getName());
+            }
+            
+            return new DeletionContext(serverId, null, containerName, false, shouldCleanupDirectory, volumePath);
         }
 
         boolean containerExists = true;
@@ -438,7 +451,7 @@ public final class DockerServiceProvider extends ServiceProvider {
             Logger.debug("Could not inspect container {} (may not exist): {}",
                     containerId.substring(0, 12), e.getMessage());
 
-            if (server.getType() == ServerType.DYNAMIC && options.isCleanupDirectory() && server.getWorkingDirectory() != null) {
+            if (server.getType() == ServerType.DYNAMIC && options.isCleanupDirectory() && options.getReason() != DeletionReason.SERVER_RESTART && server.getWorkingDirectory() != null) {
                 shouldCleanupDirectory = true;
                 volumePath = server.getWorkingDirectory();
                 if (!volumePath.startsWith("/")) {

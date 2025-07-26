@@ -76,6 +76,17 @@ public final class ServerLifecycleService {
      * @return CompletableFuture that completes when the server is stopped
      */
     public CompletableFuture<Void> stopServer(AtlasServer server) {
+        return this.stopServer(server, DeletionOptions.userCommand());
+    }
+
+    /**
+     * Stops a server with specific deletion options.
+     *
+     * @param server The server to stop
+     * @param options The deletion options to use
+     * @return CompletableFuture that completes when the server is stopped
+     */
+    public CompletableFuture<Void> stopServer(AtlasServer server, DeletionOptions options) {
         if (server.getServerInfo() != null && server.getServerInfo().getStatus() == ServerStatus.STOPPED) {
             Logger.info("Server is already stopped: " + server.getName());
             return CompletableFuture.completedFuture(null);
@@ -83,7 +94,7 @@ public final class ServerLifecycleService {
 
         if (server.getType() == ServerType.DYNAMIC) {
             Logger.debug("Detected DYNAMIC server {}, using unified deletion", server.getName());
-            return this.removeServer(server, DeletionOptions.userCommand());
+            return this.removeServer(server, options);
         }
 
         Logger.debug("Detected STATIC server {}, using stop-only mode (container will remain)", server.getName());
@@ -219,7 +230,7 @@ public final class ServerLifecycleService {
             Logger.debug("Server {} is already stopped, proceeding directly to start", server.getName());
             stopFuture = CompletableFuture.completedFuture(null);
         } else {
-            stopFuture = this.stopServer(server);
+            stopFuture = this.stopServer(server, DeletionOptions.serverRestart());
         }
         
         return stopFuture.thenCompose(v -> {

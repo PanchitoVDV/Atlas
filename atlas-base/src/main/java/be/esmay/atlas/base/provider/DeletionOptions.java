@@ -78,7 +78,7 @@ public final class DeletionOptions {
         return DeletionOptions.builder()
             .reason(DeletionReason.SYSTEM_SHUTDOWN)
             .gracefulStop(false)
-            .cleanupDirectory(false)
+            .cleanupDirectory(true)
             .timeoutSeconds(10)
             .build();
     }
@@ -90,9 +90,22 @@ public final class DeletionOptions {
         return DeletionOptions.builder()
             .reason(DeletionReason.ERROR_RECOVERY)
             .gracefulStop(false)
-            .cleanupDirectory(false)
+            .cleanupDirectory(true)
             .timeoutSeconds(5)
             .removeFromTracking(true)
+            .build();
+    }
+    
+    /**
+     * Create options for server restart
+     */
+    public static DeletionOptions serverRestart() {
+        return DeletionOptions.builder()
+            .reason(DeletionReason.SERVER_RESTART)
+            .gracefulStop(true)
+            .cleanupDirectory(false)
+            .timeoutSeconds(30)
+            .removeFromTracking(false)
             .build();
     }
 }

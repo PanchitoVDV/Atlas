@@ -25,5 +25,10 @@ public enum DeletionReason {
     /**
      * Cleaning up failed/zombie server
      */
-    ERROR_RECOVERY
+    ERROR_RECOVERY,
+    
+    /**
+     * Server restart - do not cleanup directory
+     */
+    SERVER_RESTART
 }
