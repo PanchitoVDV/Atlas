@@ -5,6 +5,7 @@ import be.esmay.atlas.common.network.packet.PacketDecoder;
 import be.esmay.atlas.common.network.packet.PacketEncoder;
 import be.esmay.atlas.common.network.packet.packets.HandshakePacket;
 import be.esmay.atlas.common.network.packet.packets.HeartbeatPacket;
+import be.esmay.atlas.common.network.packet.packets.ServerControlPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerInfoUpdatePacket;
 import be.esmay.atlas.common.network.packet.packets.ServerListRequestPacket;
 import be.esmay.atlas.velocity.AtlasVelocityPlugin;
@@ -194,6 +195,15 @@ public final class AtlasNetworkClient {
         ServerListRequestPacket packet = new ServerListRequestPacket(this.serverId);
         this.sendPacket(packet);
         this.logger.debug("Requested server list from Atlas base");
+    }
+
+    public void sendServerControl(String serverIdentifier, ServerControlPacket.ControlAction action) {
+        if (!this.authenticated.get())
+            return;
+
+        ServerControlPacket packet = new ServerControlPacket(serverIdentifier, action, this.serverId);
+        this.sendPacket(packet);
+        this.logger.debug("Sent server control {} for server {}", action, serverIdentifier);
     }
 
     public void onAuthenticated() {

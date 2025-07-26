@@ -8,6 +8,7 @@ import be.esmay.atlas.common.network.packet.packets.HandshakePacket;
 import be.esmay.atlas.common.network.packet.packets.HeartbeatPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerAddPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerCommandPacket;
+import be.esmay.atlas.common.network.packet.packets.ServerControlPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerInfoUpdatePacket;
 import be.esmay.atlas.common.network.packet.packets.ServerListPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerListRequestPacket;
@@ -124,5 +125,10 @@ public final class MinestomPacketHandler extends SimpleChannelInboundHandler<Pac
         } catch (Exception e) {
             this.logger.error("Exception while executing command: {}", packet.getCommand(), e);
         }
+    }
+
+    @Override
+    public void handleServerControl(ServerControlPacket packet) {
+        this.logger.info("Server control packet received (should not happen on client side): {} for server: {}", packet.getAction(), packet.getServerIdentifier());
     }
 }

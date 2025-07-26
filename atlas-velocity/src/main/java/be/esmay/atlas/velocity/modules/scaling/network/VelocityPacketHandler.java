@@ -10,6 +10,7 @@ import be.esmay.atlas.common.network.packet.packets.HandshakePacket;
 import be.esmay.atlas.common.network.packet.packets.HeartbeatPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerAddPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerCommandPacket;
+import be.esmay.atlas.common.network.packet.packets.ServerControlPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerInfoUpdatePacket;
 import be.esmay.atlas.common.network.packet.packets.ServerListPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerListRequestPacket;
@@ -178,5 +179,10 @@ public final class VelocityPacketHandler extends SimpleChannelInboundHandler<Pac
             this.logger.error("Exception while executing command: {}", packet.getCommand(), throwable);
             return null;
         });
+    }
+
+    @Override
+    public void handleServerControl(ServerControlPacket packet) {
+        this.logger.debug("Server control packet received (should not happen on client side): {} for server: {}", packet.getAction(), packet.getServerIdentifier());
     }
 }

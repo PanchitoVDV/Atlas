@@ -4,6 +4,7 @@ import be.esmay.atlas.base.AtlasBase;
 import be.esmay.atlas.base.network.connection.Connection;
 import be.esmay.atlas.base.network.connection.ConnectionManager;
 import be.esmay.atlas.base.network.security.AuthenticationHandler;
+import be.esmay.atlas.base.provider.ServiceProvider;
 import be.esmay.atlas.base.scaler.Scaler;
 import be.esmay.atlas.base.utils.Logger;
 import be.esmay.atlas.common.enums.ServerStatus;
@@ -17,6 +18,7 @@ import be.esmay.atlas.common.network.packet.packets.HandshakePacket;
 import be.esmay.atlas.common.network.packet.packets.HeartbeatPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerAddPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerCommandPacket;
+import be.esmay.atlas.common.network.packet.packets.ServerControlPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerInfoUpdatePacket;
 import be.esmay.atlas.common.network.packet.packets.ServerListPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerListRequestPacket;
@@ -26,6 +28,7 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 public final class AtlasChannelHandler extends SimpleChannelInboundHandler<Packet> implements PacketHandler {
@@ -242,6 +245,68 @@ public final class AtlasChannelHandler extends SimpleChannelInboundHandler<Packe
         }
 
         Logger.warn("Server command packet received by Atlas base: {} for server: {}. This packet should be handled by the target server.", packet.getCommand(), packet.getServerId());
+    }
+
+    @Override
+    public void handleServerControl(ServerControlPacket packet) {
+        Logger.debug("Server control received: {} for server: {} from requester: {}", packet.getAction(), packet.getServerIdentifier(), packet.getRequesterId());
+
+        if (this.currentContext == null) {
+            Logger.warn("Server control received but no current context available");
+            return;
+        }
+
+        Connection connection = this.connectionManager.getConnection(this.currentContext.channel());
+        if (connection == null || !connection.isAuthenticated()) {
+            Logger.warn("Server control from unauthenticated connection");
+            return;
+        }
+
+        AtlasBase atlasInstance = AtlasBase.getInstance();
+        if (atlasInstance == null || atlasInstance.getServerManager() == null) {
+            Logger.error("Atlas instance or ServerManager is not available");
+            return;
+        }
+
+        String serverIdentifier = packet.getServerIdentifier();
+        ServerControlPacket.ControlAction action = packet.getAction();
+        ServiceProvider provider = atlasInstance.getProviderManager().getProvider();
+
+        provider.getServer(serverIdentifier).thenCompose(serverOpt -> {
+            if (serverOpt.isPresent()) {
+                return CompletableFuture.completedFuture(serverOpt);
+            }
+
+            return provider.getAllServers()
+                    .thenApply(servers -> servers.stream()
+                            .filter(server -> server.getName().equals(serverIdentifier))
+                            .findFirst());
+        }).thenAccept(serverOpt -> {
+            if (serverOpt.isEmpty()) {
+                Logger.warn("Server not found: {} for control action: {}", serverIdentifier, action);
+                return;
+            }
+
+            AtlasServer server = serverOpt.get();
+
+            switch (action) {
+                case START -> {
+                    atlasInstance.getServerManager().startServer(server);
+                    Logger.info("Starting server {} requested by {}", serverIdentifier, packet.getRequesterId());
+                }
+                case STOP -> {
+                    atlasInstance.getServerManager().stopServer(server);
+                    Logger.info("Stopping server {} requested by {}", serverIdentifier, packet.getRequesterId());
+                }
+                case RESTART -> {
+                    atlasInstance.getServerManager().restartServer(server);
+                    Logger.info("Restarting server {} requested by {}", serverIdentifier, packet.getRequesterId());
+                }
+            }
+        }).exceptionally(throwable -> {
+            Logger.error("Failed to handle server control for {}: {}", serverIdentifier, throwable.getMessage());
+            return null;
+        });
     }
 
 }

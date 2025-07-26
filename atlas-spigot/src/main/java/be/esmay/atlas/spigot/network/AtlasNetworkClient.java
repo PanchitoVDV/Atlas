@@ -5,6 +5,7 @@ import be.esmay.atlas.common.network.packet.PacketDecoder;
 import be.esmay.atlas.common.network.packet.PacketEncoder;
 import be.esmay.atlas.common.network.packet.packets.HandshakePacket;
 import be.esmay.atlas.common.network.packet.packets.HeartbeatPacket;
+import be.esmay.atlas.common.network.packet.packets.ServerControlPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerInfoUpdatePacket;
 import be.esmay.atlas.common.network.packet.packets.ServerListRequestPacket;
 import be.esmay.atlas.spigot.cache.NetworkServerCacheManager;
@@ -183,6 +184,14 @@ public final class AtlasNetworkClient {
             return;
 
         ServerListRequestPacket packet = new ServerListRequestPacket(this.serverId);
+        this.sendPacket(packet);
+    }
+
+    public void sendServerControl(String serverIdentifier, ServerControlPacket.ControlAction action) {
+        if (!this.authenticated.get())
+            return;
+
+        ServerControlPacket packet = new ServerControlPacket(serverIdentifier, action, this.serverId);
         this.sendPacket(packet);
     }
 

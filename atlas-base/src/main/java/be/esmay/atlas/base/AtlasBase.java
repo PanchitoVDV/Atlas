@@ -158,12 +158,17 @@ public final class AtlasBase {
 
     private void createRequiredDirectories() {
         File serversDir = new File("servers");
-        File templatesGlobalServerDir = new File("templates/global/server");
-        File templatesGlobalProxyDir = new File("templates/global/proxy");
+        File templatesDir = new File("templates");
 
         this.createDirectory(serversDir, "servers");
-        this.createDirectory(templatesGlobalServerDir, "templates/global/server");
-        this.createDirectory(templatesGlobalProxyDir, "templates/global/proxy");
+        
+        if (!templatesDir.exists()) {
+            File templatesGlobalServerDir = new File("templates/global/server");
+            File templatesGlobalProxyDir = new File("templates/global/proxy");
+            
+            this.createDirectory(templatesGlobalServerDir, "templates/global/server");
+            this.createDirectory(templatesGlobalProxyDir, "templates/global/proxy");
+        }
     }
 
     private void createDirectory(File directory, String name) {

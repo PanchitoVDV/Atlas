@@ -3,6 +3,7 @@ package be.esmay.atlas.spigot.api;
 import be.esmay.atlas.common.enums.ServerStatus;
 import be.esmay.atlas.common.models.AtlasServer;
 import be.esmay.atlas.common.models.ServerInfo;
+import be.esmay.atlas.common.network.packet.packets.ServerControlPacket;
 import be.esmay.atlas.spigot.cache.NetworkServerCacheManager;
 import be.esmay.atlas.spigot.network.AtlasNetworkClient;
 import be.esmay.atlas.spigot.server.SpigotServerInfoManager;
@@ -42,6 +43,7 @@ public final class AtlasSpigotAPI {
         if (!AtlasSpigotAPI.initialized) {
             return Optional.empty();
         }
+
         return AtlasSpigotAPI.cacheManager.getServer(serverId);
     }
     
@@ -49,6 +51,7 @@ public final class AtlasSpigotAPI {
         if (!AtlasSpigotAPI.initialized) {
             return List.of();
         }
+
         return AtlasSpigotAPI.cacheManager.getAllServers();
     }
     
@@ -56,6 +59,7 @@ public final class AtlasSpigotAPI {
         if (!AtlasSpigotAPI.initialized) {
             return List.of();
         }
+
         return AtlasSpigotAPI.cacheManager.getServersByGroup(group);
     }
     
@@ -63,6 +67,7 @@ public final class AtlasSpigotAPI {
         if (!AtlasSpigotAPI.initialized) {
             return List.of();
         }
+
         return AtlasSpigotAPI.cacheManager.getOnlineServers();
     }
     
@@ -70,6 +75,7 @@ public final class AtlasSpigotAPI {
         if (!AtlasSpigotAPI.initialized) {
             return List.of();
         }
+
         return AtlasSpigotAPI.cacheManager.getBackendServers();
     }
     
@@ -77,6 +83,7 @@ public final class AtlasSpigotAPI {
         if (!AtlasSpigotAPI.initialized) {
             return List.of();
         }
+
         return AtlasSpigotAPI.cacheManager.getProxyServers();
     }
     
@@ -84,6 +91,7 @@ public final class AtlasSpigotAPI {
         if (!AtlasSpigotAPI.initialized) {
             return 0;
         }
+
         return AtlasSpigotAPI.cacheManager.getTotalPlayers();
     }
     
@@ -91,6 +99,7 @@ public final class AtlasSpigotAPI {
         if (!AtlasSpigotAPI.initialized) {
             return 0;
         }
+
         return AtlasSpigotAPI.cacheManager.getTotalBackendPlayers();
     }
     
@@ -98,6 +107,7 @@ public final class AtlasSpigotAPI {
         if (!AtlasSpigotAPI.initialized) {
             return 0;
         }
+
         return AtlasSpigotAPI.cacheManager.getTotalProxyPlayers();
     }
     
@@ -105,6 +115,7 @@ public final class AtlasSpigotAPI {
         if (!AtlasSpigotAPI.initialized) {
             return false;
         }
+
         Optional<AtlasServer> server = AtlasSpigotAPI.cacheManager.getServer(serverId);
         return server.isPresent() && server.get().getServerInfo() != null && server.get().getServerInfo().getStatus() == ServerStatus.RUNNING;
     }
@@ -113,6 +124,7 @@ public final class AtlasSpigotAPI {
         if (!AtlasSpigotAPI.initialized) {
             return null;
         }
+
         return AtlasSpigotAPI.serverInfoManager.getCurrentServerInfo();
     }
     
@@ -124,6 +136,7 @@ public final class AtlasSpigotAPI {
         if (!AtlasSpigotAPI.initialized) {
             return false;
         }
+
         return AtlasSpigotAPI.networkClient.isConnected();
     }
     
@@ -131,6 +144,7 @@ public final class AtlasSpigotAPI {
         if (!AtlasSpigotAPI.initialized) {
             return false;
         }
+
         return AtlasSpigotAPI.networkClient.isAuthenticated();
     }
     
@@ -138,6 +152,7 @@ public final class AtlasSpigotAPI {
         if (!AtlasSpigotAPI.initialized) {
             return;
         }
+
         AtlasSpigotAPI.networkClient.requestServerList();
     }
     
@@ -145,6 +160,31 @@ public final class AtlasSpigotAPI {
         if (!AtlasSpigotAPI.initialized) {
             return;
         }
+
         AtlasSpigotAPI.networkClient.sendServerInfoUpdate();
+    }
+
+    public static void startServer(String serverIdentifier) {
+        if (!AtlasSpigotAPI.initialized || AtlasSpigotAPI.networkClient == null) {
+            return;
+        }
+
+        AtlasSpigotAPI.networkClient.sendServerControl(serverIdentifier, ServerControlPacket.ControlAction.START);
+    }
+
+    public static void stopServer(String serverIdentifier) {
+        if (!AtlasSpigotAPI.initialized || AtlasSpigotAPI.networkClient == null) {
+            return;
+        }
+
+        AtlasSpigotAPI.networkClient.sendServerControl(serverIdentifier, ServerControlPacket.ControlAction.STOP);
+    }
+
+    public static void restartServer(String serverIdentifier) {
+        if (!AtlasSpigotAPI.initialized || AtlasSpigotAPI.networkClient == null) {
+            return;
+        }
+
+        AtlasSpigotAPI.networkClient.sendServerControl(serverIdentifier, ServerControlPacket.ControlAction.RESTART);
     }
 }

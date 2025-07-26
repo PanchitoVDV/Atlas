@@ -3,12 +3,15 @@ package be.esmay.atlas.velocity.modules.scaling;
 import be.esmay.atlas.velocity.AtlasVelocityPlugin;
 import be.esmay.atlas.velocity.modules.scaling.api.AtlasVelocityAPI;
 import be.esmay.atlas.velocity.modules.scaling.cache.NetworkServerCacheManager;
+import be.esmay.atlas.velocity.modules.scaling.commands.AtlasCommand;
 import be.esmay.atlas.velocity.modules.scaling.listeners.ProxyPlayerEventListener;
 import be.esmay.atlas.velocity.modules.scaling.network.AtlasNetworkClient;
 import be.esmay.atlas.velocity.modules.scaling.proxy.ProxyServerInfoManager;
 import be.esmay.atlas.velocity.modules.scaling.registry.VelocityServerRegistryManager;
 import com.jazzkuh.modulemanager.velocity.VelocityModule;
 import com.jazzkuh.modulemanager.velocity.VelocityModuleManager;
+import com.velocitypowered.api.command.CommandManager;
+import com.velocitypowered.api.command.CommandMeta;
 import lombok.Getter;
 
 @Getter
@@ -69,7 +72,12 @@ public final class ScalingModule extends VelocityModule<AtlasVelocityPlugin> {
         this.playerEventListener = new ProxyPlayerEventListener(this.networkClient);
         this.getPlugin().getProxyServer().getEventManager().register(this.getPlugin(), this.playerEventListener);
 
-        AtlasVelocityAPI.initialize(this.cacheManager, this.serverInfoManager);
+        CommandManager commandManager = this.getPlugin().getProxyServer().getCommandManager();
+        CommandMeta commandMeta = commandManager.metaBuilder("atlas").plugin(this.getPlugin()).build();
+        AtlasCommand atlasCommand = new AtlasCommand(this.getPlugin().getMessagesConfiguration());
+        commandManager.register(commandMeta, atlasCommand);
+
+        AtlasVelocityAPI.initialize(this.cacheManager, this.serverInfoManager, this.networkClient);
         this.networkClient.connect().thenRun(() -> this.getLogger().info("Successfully connected to Atlas base")).exceptionally(throwable -> {
             this.getLogger().error("Failed to connect to Atlas base", throwable);
             return null;

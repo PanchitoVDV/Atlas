@@ -23,6 +23,16 @@ public final class MessagesConfiguration extends ConfigurateConfig {
     private final String serverStartedNotification;
     private final String serverStoppedNotification;
 
+    private final List<String> atlasCommandHelp;
+    private final String atlasServerNotFound;
+    private final String atlasServerStarted;
+    private final String atlasServerStopped;
+    private final String atlasServerRestarted;
+    private final String atlasNoPermission;
+    private final String atlasUsageStart;
+    private final String atlasUsageStop;
+    private final String atlasUsageRestart;
+
     @SneakyThrows
     public MessagesConfiguration(Path folder) {
         super(folder, "messages.yml");
@@ -42,6 +52,21 @@ public final class MessagesConfiguration extends ConfigurateConfig {
         this.serverStartingNotification = this.rootNode.node("messages", "scaling", "server-starting").getString("<dark_gray>[<yellow>+<dark_gray>] <gray>%1 <dark_gray>» <gray>%2");
         this.serverStartedNotification = this.rootNode.node("messages", "scaling", "server-started").getString("<dark_gray>[<green>✔<dark_gray>] <gray>%1 <dark_gray>» <gray>%2");
         this.serverStoppedNotification = this.rootNode.node("messages", "scaling", "server-stopped").getString("<dark_gray>[<dark_red>✘<dark_gray>] <gray>%1 <dark_gray>» <gray>%2");
+
+        this.atlasCommandHelp = this.rootNode.node("messages", "atlas", "help").getList(String.class, List.of(
+                "<gold>Atlas Commands:",
+                "<yellow>/atlas start <server><gray> - Start a server",
+                "<yellow>/atlas stop <server><gray> - Stop a server",
+                "<yellow>/atlas restart <server><gray> - Restart a server"
+        ));
+        this.atlasServerNotFound = this.rootNode.node("messages", "atlas", "server-not-found").getString("<red>Server not found: <dark_red>%1");
+        this.atlasServerStarted = this.rootNode.node("messages", "atlas", "start", "success").getString("<green>Starting server: <dark_green>%1");
+        this.atlasServerStopped = this.rootNode.node("messages", "atlas", "stop", "success").getString("<red>Stopping server: <dark_red>%1");
+        this.atlasServerRestarted = this.rootNode.node("messages", "atlas", "restart", "success").getString("<yellow>Restarting server: <gold>%1");
+        this.atlasNoPermission = this.rootNode.node("messages", "atlas", "no-permission").getString("<red>You don't have permission to use this command.");
+        this.atlasUsageStart = this.rootNode.node("messages", "atlas", "start", "usage").getString("<red>Usage: /atlas start <server>");
+        this.atlasUsageStop = this.rootNode.node("messages", "atlas", "stop", "usage").getString("<red>Usage: /atlas stop <server>");
+        this.atlasUsageRestart = this.rootNode.node("messages", "atlas", "restart", "usage").getString("<red>Usage: /atlas restart <server>");
 
         this.saveConfiguration();
     }

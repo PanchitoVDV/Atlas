@@ -3,6 +3,7 @@ package be.esmay.atlas.minestom.api;
 import be.esmay.atlas.common.enums.ServerStatus;
 import be.esmay.atlas.common.models.AtlasServer;
 import be.esmay.atlas.common.models.ServerInfo;
+import be.esmay.atlas.common.network.packet.packets.ServerControlPacket;
 import be.esmay.atlas.minestom.AtlasMinestomPlugin;
 import be.esmay.atlas.minestom.cache.NetworkServerCacheManager;
 import be.esmay.atlas.minestom.network.AtlasNetworkClient;
@@ -182,5 +183,29 @@ public final class AtlasMinestomAPI {
 
         AtlasMinestomAPI.plugin.setMaxPlayers(maxPlayers);
         sendServerInfoUpdate();
+    }
+
+    public static void startServer(String serverIdentifier) {
+        if (!AtlasMinestomAPI.initialized || AtlasMinestomAPI.networkClient == null) {
+            return;
+        }
+
+        AtlasMinestomAPI.networkClient.sendServerControl(serverIdentifier, ServerControlPacket.ControlAction.START);
+    }
+
+    public static void stopServer(String serverIdentifier) {
+        if (!AtlasMinestomAPI.initialized || AtlasMinestomAPI.networkClient == null) {
+            return;
+        }
+
+        AtlasMinestomAPI.networkClient.sendServerControl(serverIdentifier, ServerControlPacket.ControlAction.STOP);
+    }
+
+    public static void restartServer(String serverIdentifier) {
+        if (!AtlasMinestomAPI.initialized || AtlasMinestomAPI.networkClient == null) {
+            return;
+        }
+
+        AtlasMinestomAPI.networkClient.sendServerControl(serverIdentifier, ServerControlPacket.ControlAction.RESTART);
     }
 }
