@@ -17,8 +17,10 @@ public final class TemplateManager {
     private static final String TEMPLATES_DIR = "templates";
     
     private final S3TemplateManager s3Manager;
+    private final AtlasConfig.Templates templatesConfig;
 
     public TemplateManager(AtlasConfig.Templates templatesConfig) {
+        this.templatesConfig = templatesConfig;
         this.s3Manager = templatesConfig.getS3() != null && templatesConfig.getS3().isEnabled()
             ? new S3TemplateManager(templatesConfig.getS3())
             : null;
@@ -34,6 +36,51 @@ public final class TemplateManager {
         
         for (String template : templates) {
             this.applyTemplate(serverPath, template);
+        }
+    }
+    
+    public void applyTemplatesWithPluginCleanup(String serverDirectoryPath, List<String> templates, boolean isStaticServer) {
+        if (templates == null || templates.isEmpty()) {
+            Logger.debug("No templates to apply for directory: " + serverDirectoryPath);
+            return;
+        }
+
+        Path serverPath = Paths.get(serverDirectoryPath);
+        
+        if (isStaticServer && this.templatesConfig.isCleanPluginsBeforeTemplates()) {
+            this.cleanPluginJars(serverPath);
+        }
+        
+        for (String template : templates) {
+            this.applyTemplate(serverPath, template);
+        }
+    }
+    
+    private void cleanPluginJars(Path serverPath) {
+        Path pluginsPath = serverPath.resolve("plugins");
+        
+        if (!Files.exists(pluginsPath) || !Files.isDirectory(pluginsPath)) {
+            Logger.debug("Plugins directory does not exist at: " + pluginsPath);
+            return;
+        }
+        
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(pluginsPath, "*.jar")) {
+            int deletedCount = 0;
+            for (Path jarFile : stream) {
+                try {
+                    Files.delete(jarFile);
+                    deletedCount++;
+                    Logger.debug("Deleted plugin JAR: " + jarFile.getFileName());
+                } catch (IOException e) {
+                    Logger.warn("Failed to delete plugin JAR: " + jarFile.getFileName() + " - " + e.getMessage());
+                }
+            }
+            
+            if (deletedCount > 0) {
+                Logger.debug("Cleaned " + deletedCount + " plugin JAR files from " + pluginsPath);
+            }
+        } catch (IOException e) {
+            Logger.error("Failed to clean plugin JARs from: " + pluginsPath, e);
         }
     }
 

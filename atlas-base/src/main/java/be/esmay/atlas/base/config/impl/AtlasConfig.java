@@ -96,6 +96,9 @@ public final class AtlasConfig extends ConfigurateConfig {
         @Setting("cleanup-dynamic-on-shutdown")
         private boolean cleanupDynamicOnShutdown;
 
+        @Setting("clean-plugins-before-templates")
+        private boolean cleanPluginsBeforeTemplates = true;
+
         private S3 s3;
 
     }

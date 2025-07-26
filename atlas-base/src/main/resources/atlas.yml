@@ -19,6 +19,7 @@ atlas:
   templates:
     download-on-startup: true
     cleanup-dynamic-on-shutdown: true
+    clean-plugins-before-templates: true
     s3:
       enabled: false
       bucket: "atlas-templates"
