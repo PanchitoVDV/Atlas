@@ -158,5 +158,7 @@ public final class ScalerConfig extends ConfigurateConfig {
         @Setting("working-directory")
         private String workingDirectory;
 
+        private List<String> volumes;
+
     }
 }

@@ -969,6 +969,18 @@ public final class DockerServiceProvider extends ServiceProvider {
             Logger.debug("Added volume bind: {} -> {}", absoluteWorkingDir, mountPath);
         }
 
+        if (dockerConfig.getVolumes() != null) {
+            for (String volumeConfig : dockerConfig.getVolumes()) {
+                try {
+                    Bind bind = Bind.parse(volumeConfig);
+                    binds.add(bind);
+                    Logger.debug("Added custom volume bind: {}", volumeConfig);
+                } catch (Exception e) {
+                    Logger.error("Failed to parse volume binding '{}': {}", volumeConfig, e.getMessage());
+                }
+            }
+        }
+
         return binds.toArray(new Bind[0]);
     }
 
