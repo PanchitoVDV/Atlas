@@ -60,6 +60,9 @@ public final class ScalerConfig extends ConfigurateConfig {
         @Setting("service-provider")
         private ServiceProvider serviceProvider;
 
+        @Setting("cron-jobs")
+        private List<CronJob> cronJobs;
+
     }
 
     @Data
@@ -159,6 +162,114 @@ public final class ScalerConfig extends ConfigurateConfig {
         private String workingDirectory;
 
         private List<String> volumes;
+
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @ConfigSerializable
+    public static class CronJob {
+
+        private String name;
+
+        private String schedule;
+
+        private String target;
+
+        private List<CronStep> steps;
+
+        @Default
+        private boolean enabled = true;
+
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @ConfigSerializable
+    public static class CronStep {
+
+        @Default
+        private int delay = 0;
+
+        @Setting("action-type")
+        private String actionType;
+
+        @Setting("server-control")
+        private ServerControlAction serverControl;
+
+        @Setting("server-command")
+        private ServerCommandAction serverCommand;
+
+        @Setting("backup")
+        private BackupAction backup;
+
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @ConfigSerializable
+    public static class ServerControlAction {
+
+        private String action;
+
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @ConfigSerializable
+    public static class ServerCommandAction {
+
+        private String command;
+
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @ConfigSerializable
+    public static class BackupAction {
+
+        @Setting("backup-path")
+        private String backupPath;
+
+        @Setting("filename-pattern")
+        @Default
+        private String filenamePattern = "{server-id}_{timestamp}";
+
+        @Setting("include-patterns")
+        private List<String> includePatterns;
+
+        @Setting("exclude-patterns")
+        private List<String> excludePatterns;
+
+        @Setting("local-retention")
+        private int localRetention;
+
+        @Setting("upload-to-s3")
+        private boolean uploadToS3;
+
+        @Setting("s3-bucket")
+        private String s3Bucket;
+
+        @Setting("s3-retention")
+        private int s3Retention;
+
+        @Setting("compression-format")
+        @Default
+        private String compressionFormat = "tar.gz";
+
+        @Setting("compression-level")
+        @Default
+        private int compressionLevel = 6;
 
     }
 }

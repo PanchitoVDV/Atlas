@@ -3,6 +3,7 @@ package be.esmay.atlas.base;
 import be.esmay.atlas.base.api.ApiManager;
 import be.esmay.atlas.base.commands.CommandManager;
 import be.esmay.atlas.base.config.ConfigManager;
+import be.esmay.atlas.base.cron.CronScheduler;
 import be.esmay.atlas.base.lifecycle.ServerLifecycleManager;
 import be.esmay.atlas.base.metrics.NetworkBandwidthMonitor;
 import be.esmay.atlas.base.metrics.ResourceMetricsManager;
@@ -35,6 +36,7 @@ public final class AtlasBase {
     private final CommandManager commandManager;
     private final ServerManager serverManager;
     private final ApiManager apiManager;
+    private final CronScheduler cronScheduler;
     private ResourceMetricsManager resourceMetricsManager;
     private NetworkBandwidthMonitor networkBandwidthMonitor;
 
@@ -56,6 +58,7 @@ public final class AtlasBase {
         this.commandManager = new CommandManager();
         this.serverManager = new ServerManager(this);
         this.apiManager = new ApiManager(this);
+        this.cronScheduler = new CronScheduler(this);
 
         Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown, "Atlas-Shutdown"));
     }
@@ -77,6 +80,7 @@ public final class AtlasBase {
                 this.providerManager.initialize(this.configManager.getAtlasConfig());
                 this.scalerManager.initialize();
                 this.commandManager.initialize();
+                this.cronScheduler.initialize();
 
                 this.resourceMetricsManager = new ResourceMetricsManager();
                 this.resourceMetricsManager.start();
@@ -118,6 +122,9 @@ public final class AtlasBase {
 
                 if (this.scalerManager != null)
                     this.scalerManager.shutdown();
+
+                if (this.cronScheduler != null)
+                    this.cronScheduler.shutdown();
 
                 if (this.commandManager != null)
                     this.commandManager.shutdown();

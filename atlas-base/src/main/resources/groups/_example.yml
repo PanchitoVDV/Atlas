@@ -35,3 +35,48 @@ group:
       #   - "/host/path:/container/path:ro"  # Read-only mount
       #   - "/host/configs:/configs:rw"      # Read-write mount
       #   - "/host/shared:/shared"           # Default is read-write
+
+# Cron jobs for automated server management
+# cron-jobs:
+#   - name: "graceful-restart"
+#     schedule: "0 4 * * *"  # Daily at 4 AM
+#     target: "servers"
+#     steps:
+#       - delay: 0
+#         action-type: "server-command"
+#         server-command:
+#           command: "say [SERVER] Restart in 5 minutes! Please finish up."
+#       - delay: 300  # 5 minutes later
+#         action-type: "server-command"
+#         server-command:
+#           command: "say [SERVER] Restart in 1 minute!"
+#       - delay: 60   # 1 minute later
+#         action-type: "server-control"
+#         server-control:
+#           action: "restart"
+#     enabled: false
+#
+#   - name: "daily-backup"
+#     schedule: "0 3 * * *"    # Daily at 3 AM
+#     target: "servers"        # or "group" for group-wide backup
+#     steps:
+#       - delay: 0
+#         action-type: "backup"
+#         backup:
+#           backup-path: "atlas/{group}/{server-name}"  # Path uses server name for organization
+#           filename-pattern: "{server-id}_{timestamp}"  # Filename uses server ID for uniqueness
+#           include-patterns:        # Variables: {group}, {server-id}, {server-name}, {date}, {timestamp}
+#             - "world/**"
+#             - "*.yml"
+#             - "*.json"
+#           exclude-patterns:
+#             - "logs/**"
+#             - "*.log"
+#             - "cache/**"
+#           local-retention: 7       # Keep 7 local backups per server
+#           upload-to-s3: true
+#           s3-bucket: "minecraft-backups"
+#           s3-retention: 30         # Keep 30 S3 backups per server
+#           compression-format: "tar.gz"  # tar.gz, tar.xz, tar.zst, tar.lz4
+#           compression-level: 6     # 1-9 for gzip/xz, 1-22 for zstd
+#     enabled: false

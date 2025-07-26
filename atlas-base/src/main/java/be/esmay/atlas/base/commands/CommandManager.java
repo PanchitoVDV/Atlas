@@ -1,6 +1,7 @@
 package be.esmay.atlas.base.commands;
 
 import be.esmay.atlas.base.commands.impl.ConfigCommand;
+import be.esmay.atlas.base.commands.impl.CronCommand;
 import be.esmay.atlas.base.commands.impl.DebugCommand;
 import be.esmay.atlas.base.commands.impl.GroupsCommand;
 import be.esmay.atlas.base.commands.impl.MetricsCommand;
@@ -65,6 +66,7 @@ public final class CommandManager {
         this.registerCommand(new MetricsCommand());
         this.registerCommand(new ConfigCommand());
         this.registerCommand(new TemplatesCommand());
+        this.registerCommand(new CronCommand());
 
         try {
             this.terminal = TerminalBuilder.builder()

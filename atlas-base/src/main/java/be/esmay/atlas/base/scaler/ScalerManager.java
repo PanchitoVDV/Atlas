@@ -175,6 +175,7 @@ public final class ScalerManager {
             }
         }
         this.loadScalers();
+        this.atlasBase.getCronScheduler().reloadCronJobs();
         Logger.info("Scaler configurations reloaded successfully");
     }
 
@@ -268,6 +269,7 @@ public final class ScalerManager {
         }
 
         this.scalers.add(scaler);
+        this.atlasBase.getCronScheduler().scheduleCronJobsForScaler(scaler);
         Logger.info("Loaded scaler {} with type {}", scaler.getGroupName(), type);
     }
 
@@ -285,6 +287,7 @@ public final class ScalerManager {
         }
 
         this.scalers.remove(scaler);
+        this.atlasBase.getCronScheduler().unscheduleCronJobsForGroup(groupName);
         Logger.info("Scaler {} unloaded successfully", groupName);
     }
 

@@ -53,7 +53,10 @@ public final class TemplatesCommand implements AtlasCommand {
             return;
         }
 
-        TemplateManager templateManager = new TemplateManager(atlasBase.getConfigManager().getAtlasConfig().getAtlas().getTemplates());
+        TemplateManager templateManager = new TemplateManager(
+            atlasBase.getConfigManager().getAtlasConfig().getAtlas().getTemplates(),
+            atlasBase.getConfigManager().getAtlasConfig().getAtlas().getS3()
+        );
         
         Logger.info("Clearing template cache...");
         boolean success = templateManager.clearCache();

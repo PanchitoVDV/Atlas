@@ -1872,7 +1872,10 @@ public final class DockerServiceProvider extends ServiceProvider {
             boolean downloadOnStartup = atlasBase.getConfigManager().getAtlasConfig().getAtlas().getTemplates().isDownloadOnStartup();
 
             if (downloadOnStartup && groupConfig.getTemplates() != null && !groupConfig.getTemplates().isEmpty()) {
-                TemplateManager templateManager = new TemplateManager(atlasBase.getConfigManager().getAtlasConfig().getAtlas().getTemplates());
+                TemplateManager templateManager = new TemplateManager(
+            atlasBase.getConfigManager().getAtlasConfig().getAtlas().getTemplates(),
+            atlasBase.getConfigManager().getAtlasConfig().getAtlas().getS3()
+        );
                 boolean isStaticServer = server.getType() == ServerType.STATIC;
                 templateManager.applyTemplatesWithPluginCleanup(server.getWorkingDirectory(), groupConfig.getTemplates(), isStaticServer);
                 templateManager.close();

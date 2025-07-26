@@ -33,15 +33,17 @@ import java.util.stream.Collectors;
 
 public final class S3TemplateManager {
 
-    private final AtlasConfig.S3 config;
+    private final AtlasConfig.Templates templatesConfig;
+    private final AtlasConfig.S3 s3Config;
     private final S3Client s3Client;
     private final Path cacheDirectory;
 
-    public S3TemplateManager(AtlasConfig.S3 config) {
-        this.config = config;
+    public S3TemplateManager(AtlasConfig.Templates templatesConfig, AtlasConfig.S3 s3Config) {
+        this.templatesConfig = templatesConfig;
+        this.s3Config = s3Config;
         this.s3Client = this.createS3Client();
-        this.cacheDirectory = config.getCache() != null && config.getCache().isEnabled() 
-            ? Paths.get(config.getCache().getDirectory())
+        this.cacheDirectory = templatesConfig.getS3Cache() != null && templatesConfig.getS3Cache().isEnabled() 
+            ? Paths.get(templatesConfig.getS3Cache().getDirectory())
             : null;
         
         if (this.cacheDirectory != null) {
@@ -54,12 +56,12 @@ public final class S3TemplateManager {
     }
 
     public Optional<Path> downloadTemplate(String templatePath) {
-        if (!this.config.isEnabled()) {
+        if (!this.templatesConfig.isS3Enabled()) {
             return Optional.empty();
         }
 
         try {
-            String s3Key = this.config.getPathPrefix() + templatePath;
+            String s3Key = this.templatesConfig.getS3PathPrefix() + templatePath;
             
             Optional<Path> cachedTemplate = this.getCachedTemplate(templatePath);
             if (cachedTemplate.isPresent() && this.isCacheValid(cachedTemplate.get(), s3Key)) {
@@ -75,14 +77,14 @@ public final class S3TemplateManager {
     }
 
     public boolean templateExists(String templatePath) {
-        if (!this.config.isEnabled()) {
+        if (!this.templatesConfig.isS3Enabled()) {
             return false;
         }
 
         try {
-            String s3Key = this.config.getPathPrefix() + templatePath;
+            String s3Key = this.templatesConfig.getS3PathPrefix() + templatePath;
             HeadObjectRequest headRequest = HeadObjectRequest.builder()
-                .bucket(this.config.getBucket())
+                .bucket(this.templatesConfig.getS3Bucket())
                 .key(s3Key)
                 .build();
             
@@ -97,22 +99,22 @@ public final class S3TemplateManager {
     }
 
     public TemplateMetadata getTemplateMetadata(String templatePath) {
-        if (!this.config.isEnabled()) {
+        if (!this.templatesConfig.isS3Enabled()) {
             return null;
         }
 
         try {
-            String s3Key = this.config.getPathPrefix() + templatePath;
+            String s3Key = this.templatesConfig.getS3PathPrefix() + templatePath;
             HeadObjectRequest headRequest = HeadObjectRequest.builder()
-                .bucket(this.config.getBucket())
+                .bucket(this.templatesConfig.getS3Bucket())
                 .key(s3Key)
                 .build();
             
             HeadObjectResponse response = this.s3Client.headObject(headRequest);
             
             Instant cacheExpiration = null;
-            if (this.config.getCache() != null) {
-                cacheExpiration = Instant.now().plusSeconds(this.config.getCache().getTtlSeconds());
+            if (this.templatesConfig.getS3Cache() != null) {
+                cacheExpiration = Instant.now().plusSeconds(this.templatesConfig.getS3Cache().getTtlSeconds());
             }
             
             return new TemplateMetadata(
@@ -163,14 +165,14 @@ public final class S3TemplateManager {
     public List<String> listTemplates() {
         List<String> templates = new ArrayList<>();
         
-        if (!this.config.isEnabled()) {
+        if (!this.templatesConfig.isS3Enabled()) {
             return templates;
         }
         
         try {
             ListObjectsV2Request listRequest = ListObjectsV2Request.builder()
-                .bucket(this.config.getBucket())
-                .prefix(this.config.getPathPrefix())
+                .bucket(this.templatesConfig.getS3Bucket())
+                .prefix(this.templatesConfig.getS3PathPrefix())
                 .delimiter("/")
                 .build();
             
@@ -179,8 +181,8 @@ public final class S3TemplateManager {
             templates = response.commonPrefixes().stream()
                 .map(commonPrefix -> {
                     String prefix = commonPrefix.prefix();
-                    if (prefix.startsWith(this.config.getPathPrefix())) {
-                        prefix = prefix.substring(this.config.getPathPrefix().length());
+                    if (prefix.startsWith(this.templatesConfig.getS3PathPrefix())) {
+                        prefix = prefix.substring(this.templatesConfig.getS3PathPrefix().length());
                     }
                     if (prefix.endsWith("/")) {
                         prefix = prefix.substring(0, prefix.length() - 1);
@@ -201,12 +203,12 @@ public final class S3TemplateManager {
     private S3Client createS3Client() {
         S3ClientBuilder builder = S3Client.builder();
         
-        if (this.config.getRegion() != null) {
-            builder.region(Region.of(this.config.getRegion()));
+        if (this.s3Config.getRegion() != null) {
+            builder.region(Region.of(this.s3Config.getRegion()));
         }
         
-        if (this.config.getEndpoint() != null && !this.config.getEndpoint().equals("https://s3.amazonaws.com")) {
-            builder.endpointOverride(URI.create(this.config.getEndpoint()));
+        if (this.s3Config.getEndpoint() != null && !this.s3Config.getEndpoint().equals("https://s3.amazonaws.com")) {
+            builder.endpointOverride(URI.create(this.s3Config.getEndpoint()));
             builder.forcePathStyle(true);
         }
         
@@ -217,10 +219,10 @@ public final class S3TemplateManager {
     }
 
     private AwsCredentialsProvider createCredentialsProvider() {
-        if (this.config.getAccessKeyId() != null && this.config.getSecretAccessKey() != null) {
+        if (this.s3Config.getAccessKeyId() != null && this.s3Config.getSecretAccessKey() != null) {
             AwsBasicCredentials credentials = AwsBasicCredentials.create(
-                this.config.getAccessKeyId(),
-                this.config.getSecretAccessKey()
+                this.s3Config.getAccessKeyId(),
+                this.s3Config.getSecretAccessKey()
             );
             return StaticCredentialsProvider.create(credentials);
         }
@@ -238,20 +240,20 @@ public final class S3TemplateManager {
     }
 
     private boolean isCacheValid(Path cachedFile, String s3Key) {
-        if (this.config.getCache() == null || this.config.getCache().getTtlSeconds() <= 0) {
+        if (this.templatesConfig.getS3Cache() == null || this.templatesConfig.getS3Cache().getTtlSeconds() <= 0) {
             return true;
         }
         
         try {
             Instant fileTime = Files.getLastModifiedTime(cachedFile).toInstant();
-            Instant expiration = fileTime.plusSeconds(this.config.getCache().getTtlSeconds());
+            Instant expiration = fileTime.plusSeconds(this.templatesConfig.getS3Cache().getTtlSeconds());
             
             if (Instant.now().isAfter(expiration)) {
                 return false;
             }
             
             HeadObjectRequest headRequest = HeadObjectRequest.builder()
-                .bucket(this.config.getBucket())
+                .bucket(this.templatesConfig.getS3Bucket())
                 .key(s3Key)
                 .build();
             
@@ -266,7 +268,7 @@ public final class S3TemplateManager {
     private Optional<Path> downloadFromS3(String s3Key, String templatePath) {
         try {
             GetObjectRequest getRequest = GetObjectRequest.builder()
-                .bucket(this.config.getBucket())
+                .bucket(this.templatesConfig.getS3Bucket())
                 .key(s3Key)
                 .build();
             

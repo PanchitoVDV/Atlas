@@ -19,10 +19,10 @@ public final class TemplateManager {
     private final S3TemplateManager s3Manager;
     private final AtlasConfig.Templates templatesConfig;
 
-    public TemplateManager(AtlasConfig.Templates templatesConfig) {
+    public TemplateManager(AtlasConfig.Templates templatesConfig, AtlasConfig.S3 s3Config) {
         this.templatesConfig = templatesConfig;
-        this.s3Manager = templatesConfig.getS3() != null && templatesConfig.getS3().isEnabled()
-            ? new S3TemplateManager(templatesConfig.getS3())
+        this.s3Manager = templatesConfig.isS3Enabled()
+            ? new S3TemplateManager(templatesConfig, s3Config)
             : null;
     }
 

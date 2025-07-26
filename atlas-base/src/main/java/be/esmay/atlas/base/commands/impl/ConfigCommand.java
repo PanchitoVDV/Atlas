@@ -113,18 +113,7 @@ public final class ConfigCommand implements AtlasCommand {
         } else {
             Logger.info("  [NOT CONFIGURED]");
         }
-        Logger.info("");
 
-        Logger.info("Proxy:");
-        AtlasConfig.Proxy proxy = config.getProxy();
-        if (proxy != null) {
-            Logger.info("  Auto Manage: " + proxy.isAutoManage());
-            Logger.info("  Min Instances: " + proxy.getMinInstances());
-            Logger.info("  Max Instances: " + proxy.getMaxInstances());
-            Logger.info("  Naming Pattern: " + proxy.getNamingPattern());
-        } else {
-            Logger.info("  [NOT CONFIGURED]");
-        }
     }
 
     private void handleReload() {

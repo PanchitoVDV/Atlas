@@ -1,6 +1,7 @@
 package be.esmay.atlas.base.config.impl;
 
 import be.esmay.atlas.base.config.ConfigurateConfig;
+import be.esmay.atlas.base.utils.Logger;
 import lombok.Data;
 import lombok.Getter;
 import org.spongepowered.configurate.objectmapping.ConfigSerializable;
@@ -16,7 +17,16 @@ public final class AtlasConfig extends ConfigurateConfig {
 
     public AtlasConfig() {
         super(new File(System.getProperty("user.dir")), "atlas.yml");
-        this.atlas = this.loadOrCreateConfig("atlas", Atlas.class);
+        try {
+            this.atlas = this.loadOrCreateConfig("atlas", Atlas.class);
+            if (this.atlas == null) {
+                Logger.error("Failed to load Atlas configuration - atlas is null");
+                throw new RuntimeException("Atlas configuration loading failed");
+            }
+        } catch (Exception e) {
+            Logger.error("Error in AtlasConfig constructor: " + e.getMessage(), e);
+            throw new RuntimeException("Failed to initialize AtlasConfig", e);
+        }
     }
 
     @Data
@@ -30,9 +40,9 @@ public final class AtlasConfig extends ConfigurateConfig {
 
         private Templates templates;
 
-        private Scaling scaling;
+        private S3 s3;
 
-        private Proxy proxy;
+        private Scaling scaling;
 
     }
 
@@ -99,17 +109,23 @@ public final class AtlasConfig extends ConfigurateConfig {
         @Setting("clean-plugins-before-templates")
         private boolean cleanPluginsBeforeTemplates = true;
 
-        private S3 s3;
+        @Setting("s3-enabled")
+        private boolean s3Enabled = false;
+
+        @Setting("s3-bucket")
+        private String s3Bucket = "atlas-templates";
+
+        @Setting("s3-path-prefix")
+        private String s3PathPrefix = "templates/";
+
+        @Setting("s3-cache")
+        private S3Cache s3Cache;
 
     }
 
     @Data
     @ConfigSerializable
     public static class S3 {
-
-        private boolean enabled = false;
-
-        private String bucket;
 
         private String region = "us-east-1";
 
@@ -120,11 +136,6 @@ public final class AtlasConfig extends ConfigurateConfig {
 
         @Setting("secret-access-key")
         private String secretAccessKey;
-
-        @Setting("path-prefix")
-        private String pathPrefix = "templates/";
-
-        private S3Cache cache;
 
     }
 
@@ -152,21 +163,4 @@ public final class AtlasConfig extends ConfigurateConfig {
 
     }
 
-    @Getter
-    @ConfigSerializable
-    public static class Proxy {
-
-        @Setting("auto-manage")
-        private boolean autoManage;
-
-        @Setting("min-instances")
-        private int minInstances;
-
-        @Setting("max-instances")
-        private int maxInstances;
-
-        @Setting("naming-pattern")
-        private String namingPattern;
-
-    }
 }

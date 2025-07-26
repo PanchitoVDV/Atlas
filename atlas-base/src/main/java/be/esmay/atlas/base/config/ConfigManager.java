@@ -17,7 +17,13 @@ public final class ConfigManager {
     public void initialize() {
         Logger.info("Enabling configuration manager...");
 
-        this.atlasConfig = new AtlasConfig();
+        try {
+            this.atlasConfig = new AtlasConfig();
+        } catch (Exception e) {
+            Logger.error("Failed to initialize AtlasConfig: " + e.getMessage(), e);
+            return;
+        }
+        
         this.initializeGroupsFolder();
     }
 
