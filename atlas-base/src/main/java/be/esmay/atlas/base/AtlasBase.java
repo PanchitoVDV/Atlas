@@ -1,9 +1,13 @@
 package be.esmay.atlas.base;
 
+import be.esmay.atlas.base.activity.ActivityRepository;
+import be.esmay.atlas.base.activity.ActivityService;
+import be.esmay.atlas.base.activity.ActivityType;
 import be.esmay.atlas.base.api.ApiManager;
 import be.esmay.atlas.base.commands.CommandManager;
 import be.esmay.atlas.base.config.ConfigManager;
 import be.esmay.atlas.base.cron.CronScheduler;
+import be.esmay.atlas.base.database.DatabaseManager;
 import be.esmay.atlas.base.lifecycle.ServerLifecycleManager;
 import be.esmay.atlas.base.metrics.NetworkBandwidthMonitor;
 import be.esmay.atlas.base.metrics.ResourceMetricsManager;
@@ -39,6 +43,8 @@ public final class AtlasBase {
     private final CronScheduler cronScheduler;
     private ResourceMetricsManager resourceMetricsManager;
     private NetworkBandwidthMonitor networkBandwidthMonitor;
+    private DatabaseManager databaseManager;
+    private ActivityService activityService;
 
     private NettyServer nettyServer;
 
@@ -76,6 +82,14 @@ public final class AtlasBase {
 
                 this.createRequiredDirectories();
                 this.configManager.initialize();
+
+                this.databaseManager = new DatabaseManager(this.configManager.getAtlasConfig().getAtlas().getDatabase());
+                this.databaseManager.initialize();
+                
+                ActivityRepository activityRepository = new ActivityRepository(this.databaseManager.getSessionFactory());
+                this.activityService = new ActivityService(activityRepository, this.configManager.getAtlasConfig().getAtlas().getDatabase());
+                this.activityService.initialize();
+                
                 this.nettyServer = new NettyServer(this.configManager.getAtlasConfig().getAtlas().getNetwork());
                 this.providerManager.initialize(this.configManager.getAtlasConfig());
                 this.scalerManager.initialize();
@@ -94,6 +108,12 @@ public final class AtlasBase {
                 Thread.sleep(500);
 
                 this.running = true;
+
+                this.activityService.recordActivity(
+                    ActivityType.ATLAS_LIFECYCLE, 
+                    "Atlas started successfully"
+                );
+                
                 Logger.info("Atlas is now running and ready to use.");
             } catch (Exception e) {
                 Logger.error("Failed to start Atlas", e);
@@ -112,6 +132,13 @@ public final class AtlasBase {
             this.running = false;
 
             try {
+                if (this.activityService != null) {
+                    this.activityService.recordActivity(
+                        ActivityType.ATLAS_LIFECYCLE, 
+                        "Atlas shutting down"
+                    );
+                }
+                
                 this.shutdownExecutorService();
 
                 if (this.nettyServer != null)
@@ -137,6 +164,12 @@ public final class AtlasBase {
                     
                 if (this.providerManager != null)
                     this.providerManager.shutdown();
+                    
+                if (this.activityService != null)
+                    this.activityService.shutdown();
+                    
+                if (this.databaseManager != null)
+                    this.databaseManager.shutdown();
 
                 Logger.info("Atlas has been stopped successfully.");
                 Logger.closeLogFile();
@@ -166,8 +199,10 @@ public final class AtlasBase {
     private void createRequiredDirectories() {
         File serversDir = new File("servers");
         File templatesDir = new File("templates");
+        File dataDir = new File("data");
 
         this.createDirectory(serversDir, "servers");
+        this.createDirectory(dataDir, "data");
         
         if (!templatesDir.exists()) {
             File templatesGlobalServerDir = new File("templates/global/server");

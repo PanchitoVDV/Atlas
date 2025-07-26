@@ -1,6 +1,7 @@
 package be.esmay.atlas.base.lifecycle;
 
 import be.esmay.atlas.base.AtlasBase;
+import be.esmay.atlas.base.activity.ActivityType;
 import be.esmay.atlas.base.api.WebSocketManager;
 import be.esmay.atlas.base.api.dto.WebSocketMessage;
 import be.esmay.atlas.base.provider.DeletionOptions;
@@ -253,6 +254,16 @@ public final class ServerLifecycleService {
 
                     scaler.clearRestartFlag(server.getServerId());
 
+                    if (this.atlasBase.getActivityService() != null) {
+                        this.atlasBase.getActivityService().recordActivity(
+                            ActivityType.SERVER_RESTART,
+                            server.getServerId(),
+                            server.getGroup(),
+                            "manual",
+                            String.format("Server %s restarted successfully", server.getName())
+                        );
+                    }
+
                     WebSocketMessage restartMessage = WebSocketMessage.event("restart-completed", server.getServerId());
                     webSocketManager.sendToServerConnections(server.getServerId(), restartMessage);
                     webSocketManager.restartLogStreamingForServer(server.getServerId());
@@ -260,8 +271,7 @@ public final class ServerLifecycleService {
                 })
                 .exceptionally(throwable -> {
                     Logger.error("Failed to restart server: " + server.getName(), throwable);
-                    
-                    // Clear restart flag even on failure
+
                     scaler.clearRestartFlag(server.getServerId());
                     
                     return null;

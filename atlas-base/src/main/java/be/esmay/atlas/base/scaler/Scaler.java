@@ -1,6 +1,7 @@
 package be.esmay.atlas.base.scaler;
 
 import be.esmay.atlas.base.AtlasBase;
+import be.esmay.atlas.base.activity.ActivityType;
 import be.esmay.atlas.base.config.impl.ScalerConfig;
 import be.esmay.atlas.base.lifecycle.ServerLifecycleManager;
 import be.esmay.atlas.base.lifecycle.ServerLifecycleService;
@@ -18,6 +19,7 @@ import lombok.Getter;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -38,13 +40,7 @@ public abstract class Scaler {
     protected final Map<String, AtlasServer> servers = new ConcurrentHashMap<>();
     protected final Set<String> pendingRemovals = ConcurrentHashMap.newKeySet();
     protected final Set<String> reservedNames = ConcurrentHashMap.newKeySet();
-    /**
-     * -- GETTER --
-     *  Gets the set of manually stopped server IDs.
-     *  Used by zombie detection to skip manually stopped servers.
-     *
-     * @return Set of manually stopped server IDs
-     */
+
     @Getter
     protected final Set<String> manuallyStopped = ConcurrentHashMap.newKeySet();
     protected final Set<String> currentlyRestarting = ConcurrentHashMap.newKeySet();
@@ -60,6 +56,41 @@ public abstract class Scaler {
         this.serviceProvider = AtlasBase.getInstance().getProviderManager().getProvider();
         this.lifecycleManager = new ServerLifecycleManager();
         this.lifecycleService = new ServerLifecycleService(AtlasBase.getInstance());
+    }
+
+    protected void recordScalingActivity(String direction, int serversBefore, int serversAfter, String triggeredBy, String reason, List<String> serversAdded, List<String> serversRemoved) {
+        try {
+            AtlasBase atlasBase = AtlasBase.getInstance();
+            if (atlasBase.getActivityService() != null) {
+                Map<String, Object> metadata = new HashMap<>();
+                metadata.put("direction", direction);
+                metadata.put("servers_before", serversBefore);
+                metadata.put("servers_after", serversAfter);
+                metadata.put("trigger_reason", reason);
+                if (serversAdded != null && !serversAdded.isEmpty()) {
+                    metadata.put("servers_added", serversAdded);
+                }
+                if (serversRemoved != null && !serversRemoved.isEmpty()) {
+                    metadata.put("servers_removed", serversRemoved);
+                }
+
+                String description = String.format("Auto-scaled %s: %d→%d servers", direction, serversBefore, serversAfter);
+                if ("manual".equals(triggeredBy)) {
+                    description = String.format("Manually scaled %s: %d→%d servers", direction, serversBefore, serversAfter);
+                }
+
+                atlasBase.getActivityService().recordActivity(
+                    ActivityType.SCALING_OPERATION,
+                    null,
+                    this.groupName,
+                    triggeredBy,
+                    description,
+                    metadata
+                );
+            }
+        } catch (Exception e) {
+            Logger.error("Failed to record scaling activity for group: {}", this.groupName, e);
+        }
     }
 
     public abstract ScaleType needsScaling();
@@ -152,9 +183,21 @@ public abstract class Scaler {
         
         CompletableFuture<AtlasServer> createFuture = this.serviceProvider.startServerCompletely(server, StartOptions.scalingUp());
 
+        int serversBefore = this.servers.size();
+        
         CompletableFuture<Void> acceptFuture = createFuture.thenAccept(startedServer -> {
             this.servers.put(startedServer.getServerId(), startedServer);
             Logger.debug("Updated manual server after successful start: {}", startedServer.getName());
+
+            this.recordScalingActivity(
+                "up", 
+                serversBefore, 
+                this.servers.size(),
+                "manual", 
+                "manual_scale_up",
+                List.of(startedServer.getName()),
+                null
+            );
         });
 
         return acceptFuture.exceptionally(throwable -> {
@@ -171,6 +214,7 @@ public abstract class Scaler {
 
         if (currentAutoServers < minServers) {
             int serversToCreate = minServers - currentAutoServers;
+            int serversBefore = this.servers.size();
             Logger.debug("Scaling up to minimum servers for group: {}. Creating {} servers to reach minimum of {}", this.groupName, serversToCreate, minServers);
 
             List<CompletableFuture<Void>> futures = new ArrayList<>();
@@ -180,16 +224,41 @@ public abstract class Scaler {
 
             CompletableFuture<Void> allFuture = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
 
-            return allFuture.thenRun(() -> this.lastScaleUpTime = Instant.now());
+            return allFuture.thenRun(() -> {
+                this.lastScaleUpTime = Instant.now();
+
+                this.recordScalingActivity(
+                    "up", 
+                    serversBefore, 
+                    this.servers.size(),
+                    "scaler", 
+                    "minimum_servers_enforcement",
+                    null,
+                    null
+                );
+            });
         }
 
         if (!this.canScaleUp()) {
             return CompletableFuture.completedFuture(null);
         }
 
+        int serversBefore = this.servers.size();
         CompletableFuture<Void> createFuture = this.createAutoScaledServer();
 
-        return createFuture.thenRun(() -> this.lastScaleUpTime = Instant.now());
+        return createFuture.thenRun(() -> {
+            this.lastScaleUpTime = Instant.now();
+
+            this.recordScalingActivity(
+                "up", 
+                serversBefore, 
+                this.servers.size(),
+                "scaler", 
+                "utilization_threshold",
+                null,
+                null
+            );
+        });
     }
 
     private CompletableFuture<Void> createAutoScaledServer() {
@@ -246,10 +315,22 @@ public abstract class Scaler {
                 .orElse(null);
 
         if (serverToRemove != null) {
-            Logger.info("Auto-scaling down server: {} (players: {}) from group: {}", serverToRemove.getName(), serverToRemove.getServerInfo() != null ? serverToRemove.getServerInfo().getOnlinePlayers() : 0, this.groupName);
+            int serversBefore = this.servers.size();
+            String serverName = serverToRemove.getName();
+            Logger.info("Auto-scaling down server: {} (players: {}) from group: {}", serverName, serverToRemove.getServerInfo() != null ? serverToRemove.getServerInfo().getOnlinePlayers() : 0, this.groupName);
 
             this.remove(serverToRemove);
             this.lastScaleDownTime = Instant.now();
+
+            this.recordScalingActivity(
+                "down", 
+                serversBefore, 
+                this.servers.size(),
+                "scaler", 
+                "utilization_below_threshold",
+                null,
+                List.of(serverName)
+            );
         }
     }
 
@@ -281,10 +362,22 @@ public abstract class Scaler {
                 .orElse(null);
 
         if (serverToRemove != null) {
+            int serversBefore = this.servers.size();
             String serverType = serverToRemove.isManuallyScaled() ? "manual" : "auto-scaled";
-            Logger.info("Manually scaling down {} server: {} (players: {}) from group: {}", serverType, serverToRemove.getName(), serverToRemove.getServerInfo() != null ? serverToRemove.getServerInfo().getOnlinePlayers() : 0, this.groupName);
+            String serverName = serverToRemove.getName();
+            Logger.info("Manually scaling down {} server: {} (players: {}) from group: {}", serverType, serverName, serverToRemove.getServerInfo() != null ? serverToRemove.getServerInfo().getOnlinePlayers() : 0, this.groupName);
 
             this.remove(serverToRemove);
+
+            this.recordScalingActivity(
+                "down", 
+                serversBefore, 
+                this.servers.size(),
+                "manual", 
+                "manual_scale_down",
+                null,
+                List.of(serverName)
+            );
         } else {
             Logger.info("No running servers available to scale down in group: {}", this.groupName);
         }

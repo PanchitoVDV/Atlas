@@ -44,6 +44,8 @@ public final class AtlasConfig extends ConfigurateConfig {
 
         private Scaling scaling;
 
+        private Database database;
+
     }
 
     @Data
@@ -160,6 +162,25 @@ public final class AtlasConfig extends ConfigurateConfig {
         private int checkInterval;
 
         private int cooldown;
+
+    }
+
+    @Data
+    @ConfigSerializable
+    public static class Database {
+
+        private String type = "h2";
+
+        private String path = "data/atlas.db";
+
+        private String url;
+
+        private String username;
+
+        private String password;
+
+        @Setting("retention-days")
+        private int retentionDays = 30;
 
     }
 

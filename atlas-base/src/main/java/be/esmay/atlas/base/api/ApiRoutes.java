@@ -1,6 +1,10 @@
 package be.esmay.atlas.base.api;
 
 import be.esmay.atlas.base.AtlasBase;
+import be.esmay.atlas.base.activity.ActivityService;
+import be.esmay.atlas.base.activity.ActivityType;
+import be.esmay.atlas.base.activity.ServerActivity;
+import be.esmay.atlas.base.api.dto.ActivityResponse;
 import be.esmay.atlas.base.api.dto.ApiResponse;
 import be.esmay.atlas.base.api.dto.FileListResponse;
 import be.esmay.atlas.base.api.dto.UploadSession;
@@ -79,6 +83,9 @@ public final class ApiRoutes {
         this.router.get("/api/v1/scaling").handler(this::getScaling);
         this.router.get("/api/v1/metrics").handler(this::getMetrics);
         this.router.get("/api/v1/utilization").handler(this::getUtilization);
+        this.router.get("/api/v1/activity/recent").handler(this::getRecentActivity);
+        this.router.get("/api/v1/activity/servers/:id").handler(this::getServerActivity);
+        this.router.get("/api/v1/activity/groups/:name").handler(this::getGroupActivity);
 
         this.router.post("/api/v1/servers").handler(this::createServers);
         this.router.post("/api/v1/servers/:id/start").handler(this::startServer);
@@ -1447,5 +1454,151 @@ public final class ApiRoutes {
             Logger.error("Failed to complete upload session {}", uploadId, e);
             this.sendError(context, "Failed to complete upload: " + e.getMessage());
         }
+    }
+
+    private void getRecentActivity(RoutingContext context) {
+        try {
+            ActivityService activityService = AtlasBase.getInstance().getActivityService();
+            if (activityService == null) {
+                this.sendError(context, "Activity service not available", 503);
+                return;
+            }
+
+            String limitParam = context.request().getParam("limit");
+            String groupParam = context.request().getParam("group");
+            String serverParam = context.request().getParam("server");
+            String typeParam = context.request().getParam("type");
+
+            int limit = 50; // default
+            if (limitParam != null) {
+                try {
+                    limit = Integer.parseInt(limitParam);
+                    limit = Math.min(Math.max(limit, 1), 500); // between 1 and 500
+                } catch (NumberFormatException e) {
+                    this.sendError(context, "Invalid limit parameter: " + limitParam, 400);
+                    return;
+                }
+            }
+
+            ActivityType activityType = null;
+            if (typeParam != null && !typeParam.trim().isEmpty()) {
+                try {
+                    activityType = ActivityType.valueOf(typeParam.toUpperCase());
+                } catch (IllegalArgumentException e) {
+                    this.sendError(context, "Invalid activity type: " + typeParam, 400);
+                    return;
+                }
+            }
+
+            List<ServerActivity> activities;
+            if (groupParam != null || serverParam != null || activityType != null) {
+                activities = activityService.getFilteredActivities(serverParam, groupParam, activityType, limit);
+            } else {
+                activities = activityService.getRecentActivities(limit);
+            }
+
+            List<ActivityResponse> response = activities.stream()
+                .map(this::mapActivityToResponse)
+                .collect(Collectors.toList());
+
+            this.sendResponse(context, ApiResponse.success(response));
+
+        } catch (Exception e) {
+            Logger.error("Failed to get recent activities", e);
+            this.sendError(context, "Failed to get activities: " + e.getMessage());
+        }
+    }
+
+    private void getServerActivity(RoutingContext context) {
+        try {
+            ActivityService activityService = AtlasBase.getInstance().getActivityService();
+            if (activityService == null) {
+                this.sendError(context, "Activity service not available", 503);
+                return;
+            }
+
+            String serverId = context.pathParam("id");
+            String limitParam = context.request().getParam("limit");
+
+            int limit = 50; // default
+            if (limitParam != null) {
+                try {
+                    limit = Integer.parseInt(limitParam);
+                    limit = Math.min(Math.max(limit, 1), 200); // between 1 and 200
+                } catch (NumberFormatException e) {
+                    this.sendError(context, "Invalid limit parameter: " + limitParam, 400);
+                    return;
+                }
+            }
+
+            List<ServerActivity> activities = activityService.getActivitiesByServer(serverId, limit);
+            List<ActivityResponse> response = activities.stream()
+                .map(this::mapActivityToResponse)
+                .collect(Collectors.toList());
+
+            this.sendResponse(context, ApiResponse.success(response));
+
+        } catch (Exception e) {
+            Logger.error("Failed to get server activities for {}", context.pathParam("id"), e);
+            this.sendError(context, "Failed to get server activities: " + e.getMessage());
+        }
+    }
+
+    private void getGroupActivity(RoutingContext context) {
+        try {
+            ActivityService activityService = AtlasBase.getInstance().getActivityService();
+            if (activityService == null) {
+                this.sendError(context, "Activity service not available", 503);
+                return;
+            }
+
+            String groupName = context.pathParam("name");
+            String limitParam = context.request().getParam("limit");
+
+            int limit = 50;
+            if (limitParam != null) {
+                try {
+                    limit = Integer.parseInt(limitParam);
+                    limit = Math.min(Math.max(limit, 1), 200);
+                } catch (NumberFormatException e) {
+                    this.sendError(context, "Invalid limit parameter: " + limitParam, 400);
+                    return;
+                }
+            }
+
+            List<ServerActivity> activities = activityService.getActivitiesByGroup(groupName, limit);
+            List<ActivityResponse> response = activities.stream()
+                .map(this::mapActivityToResponse)
+                .collect(Collectors.toList());
+
+            this.sendResponse(context, ApiResponse.success(response));
+
+        } catch (Exception e) {
+            Logger.error("Failed to get group activities for {}", context.pathParam("name"), e);
+            this.sendError(context, "Failed to get group activities: " + e.getMessage());
+        }
+    }
+
+    private ActivityResponse mapActivityToResponse(ServerActivity activity) {
+        Map<String, Object> metadata = null;
+        if (activity.getMetadata() != null && !activity.getMetadata().trim().isEmpty()) {
+            try {
+                metadata = this.objectMapper.readValue(activity.getMetadata(), Map.class);
+            } catch (Exception e) {
+                Logger.debug("Failed to parse activity metadata for {}: {}", activity.getId(), e.getMessage());
+            }
+        }
+
+        return ActivityResponse.builder()
+            .id(activity.getId())
+            .serverId(activity.getServerId())
+            .serverName(activity.getServerName())
+            .groupName(activity.getGroupName())
+            .activityType(activity.getActivityType())
+            .timestamp(activity.getTimestamp())
+            .triggeredBy(activity.getTriggeredBy())
+            .description(activity.getDescription())
+            .metadata(metadata)
+            .build();
     }
 }

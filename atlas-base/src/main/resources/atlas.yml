@@ -38,3 +38,11 @@ atlas:
   scaling:
     check-interval: 1
     cooldown: 5
+
+  database:
+    type: "h2" # or mysql
+    path: "data/atlas.db"
+    # url: "jdbc:mysql://localhost:3306/atlas" # for mysql
+    # username: "atlas"
+    # password: "${DB_PASSWORD}"
+    retention-days: 30

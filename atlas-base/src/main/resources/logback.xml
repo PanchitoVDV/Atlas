@@ -31,6 +31,13 @@
     <logger name="org.apache.http.impl" level="OFF" />
     <logger name="org.apache.http.client" level="OFF" />
 
+    <logger name="com.zaxxer.hikari" level="ERROR" />
+    <logger name="org.hibernate" level="ERROR" />
+    <logger name="org.glassfish.jersey" level="ERROR" />
+    <logger name="org.jvnet.hk2" level="ERROR" />
+    <logger name="javax.activation" level="ERROR" />
+    <logger name="jakarta.activation" level="ERROR" />
+
     <root level="INFO">
         <appender-ref ref="CONSOLE" />
         <appender-ref ref="FILE" />
