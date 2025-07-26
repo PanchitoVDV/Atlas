@@ -39,6 +39,8 @@ public final class ScalingCommand implements AtlasCommand {
             case "status" -> this.handleStatus();
             case "pause" -> this.handleTogglePause(args);
             case "trigger" -> this.handleTrigger(args);
+            case "set" -> this.handleSet(args);
+            case "get" -> this.handleGet(args);
             case "help" -> this.showHelp();
             default -> {
                 Logger.error("Unknown subcommand: " + subcommand);
@@ -59,13 +61,23 @@ public final class ScalingCommand implements AtlasCommand {
         Logger.info("  status               Show scaling status for all groups");
         Logger.info("  pause <group>        Toggle auto-scaling for a group (pause/resume)");
         Logger.info("  trigger <group> <up|down>  Force immediate scaling action");
+        Logger.info("  set <group> <property> <value>  Modify scaling configuration");
+        Logger.info("  get <group>          Display current scaling configuration");
+        Logger.info("");
+        Logger.info("Properties for 'set' command:");
+        Logger.info("  min-servers          Minimum number of servers");
+        Logger.info("  max-servers          Maximum number of servers (-1 for unlimited)");
+        Logger.info("  scale-up-threshold   Utilization threshold to scale up (0.0-1.0)");
+        Logger.info("  scale-down-threshold Utilization threshold to scale down (0.0-1.0)");
         Logger.info("");
         Logger.info("Examples:");
         Logger.info("  scaling status");
         Logger.info("  scaling pause lobby");
-        Logger.info("  scaling pause lobby     # Run again to resume");
         Logger.info("  scaling trigger lobby up");
-        Logger.info("  scaling trigger lobby down");
+        Logger.info("  scaling set lobby min-servers 2");
+        Logger.info("  scaling set lobby max-servers 10");
+        Logger.info("  scaling set lobby scale-up-threshold 0.8");
+        Logger.info("  scaling get lobby");
     }
 
     private void handleStatus() {
@@ -175,5 +187,121 @@ public final class ScalingCommand implements AtlasCommand {
                 Logger.error("Failed to trigger scaling " + direction + " for group " + groupName + ": " + e.getMessage());
             }
         });
+    }
+
+    private void handleSet(String[] args) {
+        if (args.length < 4) {
+            Logger.error("Usage: scaling set <group> <property> <value>");
+            return;
+        }
+
+        String groupName = args[1];
+        String property = args[2];
+        String value = args[3];
+
+        Scaler scaler = AtlasBase.getInstance().getScalerManager().getScaler(groupName);
+        if (scaler == null) {
+            Logger.error("Group not found: " + groupName);
+            return;
+        }
+
+        switch (property) {
+            case "min-servers" -> {
+                try {
+                    int minServers = Integer.parseInt(value);
+                    if (minServers < 0) {
+                        Logger.error("Minimum servers must be 0 or greater");
+                        return;
+                    }
+                    scaler.setMinServers(minServers);
+                    scaler.getScalerConfig().updateAndSave();
+                    Logger.info("Set min-servers to {} for group {}", minServers, groupName);
+                } catch (NumberFormatException e) {
+                    Logger.error("Invalid number: " + value);
+                } catch (IllegalArgumentException e) {
+                    Logger.error("Failed to set min-servers: " + e.getMessage());
+                }
+            }
+            case "max-servers" -> {
+                try {
+                    int maxServers = Integer.parseInt(value);
+                    if (maxServers < -1) {
+                        Logger.error("Maximum servers must be -1 (unlimited) or greater");
+                        return;
+                    }
+                    scaler.setMaxServers(maxServers);
+                    scaler.getScalerConfig().updateAndSave();
+                    Logger.info("Set max-servers to {} for group {}", maxServers == -1 ? "unlimited" : maxServers, groupName);
+                } catch (NumberFormatException e) {
+                    Logger.error("Invalid number: " + value);
+                } catch (IllegalArgumentException e) {
+                    Logger.error("Failed to set max-servers: " + e.getMessage());
+                }
+            }
+            case "scale-up-threshold" -> {
+                try {
+                    double threshold = Double.parseDouble(value);
+                    if (threshold < 0.0 || threshold > 1.0) {
+                        Logger.error("Scale-up threshold must be between 0.0 and 1.0");
+                        return;
+                    }
+                    scaler.setScaleUpThreshold(threshold);
+                    scaler.getScalerConfig().updateAndSave();
+                    Logger.info("Set scale-up-threshold to {}% for group {}", (int)(threshold * 100), groupName);
+                } catch (NumberFormatException e) {
+                    Logger.error("Invalid number: " + value);
+                }
+            }
+            case "scale-down-threshold" -> {
+                try {
+                    double threshold = Double.parseDouble(value);
+                    if (threshold < 0.0 || threshold > 1.0) {
+                        Logger.error("Scale-down threshold must be between 0.0 and 1.0");
+                        return;
+                    }
+                    scaler.setScaleDownThreshold(threshold);
+                    scaler.getScalerConfig().updateAndSave();
+                    Logger.info("Set scale-down-threshold to {}% for group {}", (int)(threshold * 100), groupName);
+                } catch (NumberFormatException e) {
+                    Logger.error("Invalid number: " + value);
+                }
+            }
+            default -> Logger.error("Unknown property: " + property);
+        }
+    }
+
+    private void handleGet(String[] args) {
+        if (args.length < 2) {
+            Logger.error("Usage: scaling get <group>");
+            return;
+        }
+
+        String groupName = args[1];
+        Scaler scaler = AtlasBase.getInstance().getScalerManager().getScaler(groupName);
+        
+        if (scaler == null) {
+            Logger.error("Group not found: " + groupName);
+            return;
+        }
+
+        ScalerConfig.Group groupConfig = scaler.getScalerConfig().getGroup();
+        ScalerConfig.Server serverConfig = groupConfig.getServer();
+        ScalerConfig.Conditions conditions = groupConfig.getScaling().getConditions();
+
+        Logger.info("Scaling Configuration for: " + groupName);
+        Logger.info("");
+        Logger.info("Server Limits:");
+        Logger.info("  Min Servers: " + serverConfig.getMinServers());
+        Logger.info("  Max Servers: " + (serverConfig.getMaxServers() == -1 ? "Unlimited" : serverConfig.getMaxServers()));
+        Logger.info("");
+        Logger.info("Scaling Thresholds:");
+        Logger.info("  Scale Up: " + String.format("%.1f%%", conditions.getScaleUpThreshold() * 100));
+        Logger.info("  Scale Down: " + String.format("%.1f%%", conditions.getScaleDownThreshold() * 100));
+        Logger.info("");
+        Logger.info("Current Status:");
+        Logger.info("  Auto-scaled servers: " + scaler.getAutoScaledServers().size());
+        Logger.info("  Manual servers: " + scaler.getManuallyScaledServers().size());
+        Logger.info("  Current utilization: " + String.format("%.1f%%", scaler.getCurrentUtilization() * 100));
+        Logger.info("  Scaling paused: " + (scaler.isPaused() ? "Yes" : "No"));
     }
 }

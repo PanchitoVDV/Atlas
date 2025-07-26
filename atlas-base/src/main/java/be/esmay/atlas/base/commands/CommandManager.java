@@ -9,8 +9,10 @@ import be.esmay.atlas.base.commands.impl.ServersCommand;
 import be.esmay.atlas.base.commands.impl.StopCommand;
 import be.esmay.atlas.base.commands.impl.TemplatesCommand;
 import be.esmay.atlas.base.utils.Logger;
+import org.jline.reader.EndOfFileException;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
+import org.jline.reader.UserInterruptException;
 import org.jline.reader.impl.DefaultParser;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
@@ -50,6 +52,7 @@ public final class CommandManager {
     private Terminal terminal;
     private LineReader lineReader;
     private ExecutorService commandExecutor;
+
 
     public void initialize() {
         Logger.info("Enabling command manager...");
@@ -140,7 +143,8 @@ public final class CommandManager {
     private void handleInput() {
         while (this.running && !Thread.currentThread().isInterrupted()) {
             try {
-                String input = this.lineReader.readLine(this.getPromptString());
+                String promptString = this.getPromptString();
+                String input = this.lineReader.readLine(promptString);
 
                 if (input == null)
                     break;
@@ -150,6 +154,10 @@ public final class CommandManager {
                     continue;
 
                 this.processCommand(input);
+            } catch (UserInterruptException e) {
+                Logger.info("Command interrupted by user");
+            } catch (EndOfFileException e) {
+                break;
             } catch (Exception e) {
                 if (!Thread.currentThread().isInterrupted())
                     Logger.error("Command handling error", e);
@@ -348,5 +356,10 @@ public final class CommandManager {
     public int getCommandCount() {
         return this.primaryCommands.size();
     }
+
+    public LineReader getLineReader() {
+        return this.lineReader;
+    }
+
 
 }

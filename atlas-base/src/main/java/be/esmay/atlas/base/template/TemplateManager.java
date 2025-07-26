@@ -6,8 +6,10 @@ import be.esmay.atlas.base.utils.Logger;
 import java.io.IOException;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public final class TemplateManager {
@@ -120,5 +122,37 @@ public final class TemplateManager {
         if (this.s3Manager != null) {
             this.s3Manager.close();
         }
+    }
+    
+    public List<String> getAvailableTemplates() {
+        List<String> templates = new ArrayList<>();
+        
+        Path templatesPath = Paths.get(TEMPLATES_DIR);
+        if (!Files.exists(templatesPath)) {
+            return templates;
+        }
+        
+        try (Stream<Path> paths = Files.walk(templatesPath)) {
+            List<String> localTemplates = paths
+                .filter(Files::isDirectory)
+                .filter(path -> !path.equals(templatesPath))
+                .map(path -> templatesPath.relativize(path).toString())
+                .map(path -> path.replace(FileSystems.getDefault().getSeparator(), "/"))
+                .sorted()
+                .collect(Collectors.toList());
+                
+            templates.addAll(localTemplates);
+                
+            if (this.s3Manager != null) {
+                List<String> s3Templates = this.s3Manager.listTemplates();
+                s3Templates.stream()
+                    .filter(s3Template -> !templates.contains(s3Template))
+                    .forEach(templates::add);
+            }
+        } catch (IOException e) {
+            Logger.error("Failed to list available templates", e);
+        }
+        
+        return templates;
     }
 }

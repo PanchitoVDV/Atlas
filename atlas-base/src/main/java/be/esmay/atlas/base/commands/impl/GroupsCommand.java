@@ -10,6 +10,7 @@ import be.esmay.atlas.base.utils.Logger;
 import be.esmay.atlas.common.enums.ServerStatus;
 import be.esmay.atlas.common.models.AtlasServer;
 
+import java.io.File;
 import java.util.Arrays;
 import java.util.List;
 
@@ -45,6 +46,8 @@ public final class GroupsCommand implements AtlasCommand {
             case "start" -> this.handleStart(args);
             case "stop" -> this.handleStop(args);
             case "restart" -> this.handleRestart(args);
+            case "load" -> this.handleLoad(args);
+            case "unload" -> this.handleUnload(args);
             case "help" -> this.showHelp();
             default -> {
                 Logger.error("Unknown subcommand: " + subcommand);
@@ -68,6 +71,8 @@ public final class GroupsCommand implements AtlasCommand {
         Logger.info("  start <group>     Start all stopped servers in a group");
         Logger.info("  stop <group>      Stop all running servers in a group");
         Logger.info("  restart <group>   Restart all servers in a group");
+        Logger.info("  load <group>      Load a group from disk configuration");
+        Logger.info("  unload <group>    Unload a group from memory");
         Logger.info("");
         Logger.info("Examples:");
         Logger.info("  groups list");
@@ -76,6 +81,8 @@ public final class GroupsCommand implements AtlasCommand {
         Logger.info("  groups start lobby");
         Logger.info("  groups stop lobby");
         Logger.info("  groups restart lobby");
+        Logger.info("  groups load lobby");
+        Logger.info("  groups unload proxy");
     }
 
     private void handleList() {
@@ -326,5 +333,40 @@ public final class GroupsCommand implements AtlasCommand {
             }
             Logger.info("Restarted {} servers in group: {}", restartedCount, groupName);
         });
+    }
+
+
+    private void handleLoad(String[] args) {
+        if (args.length < 2) {
+            Logger.error("Usage: groups load <group>");
+            return;
+        }
+
+        String groupName = String.join(" ", Arrays.copyOfRange(args, 1, args.length));
+        
+        if (AtlasBase.getInstance().getScalerManager().getScaler(groupName) != null) {
+            Logger.warn("Group '{}' is already loaded.", groupName);
+            return;
+        }
+
+        AtlasBase.getInstance().getScalerManager().loadScaler(groupName);
+    }
+
+    private void handleUnload(String[] args) {
+        if (args.length < 2) {
+            Logger.error("Usage: groups unload <group>");
+            return;
+        }
+
+        String groupName = String.join(" ", Arrays.copyOfRange(args, 1, args.length));
+        Scaler scaler = AtlasBase.getInstance().getScalerManager().getScaler(groupName);
+
+        if (scaler == null) {
+            Logger.error("Group not found: " + groupName);
+            return;
+        }
+
+        Logger.info("Unloading group '{}'. This will stop all servers in the group.", groupName);
+        AtlasBase.getInstance().getScalerManager().unloadScaler(groupName);
     }
 }

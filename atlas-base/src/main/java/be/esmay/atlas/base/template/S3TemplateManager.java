@@ -14,6 +14,8 @@ import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 
@@ -24,7 +26,10 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 public final class S3TemplateManager {
 
@@ -153,6 +158,44 @@ public final class S3TemplateManager {
         if (this.s3Client != null) {
             this.s3Client.close();
         }
+    }
+    
+    public List<String> listTemplates() {
+        List<String> templates = new ArrayList<>();
+        
+        if (!this.config.isEnabled()) {
+            return templates;
+        }
+        
+        try {
+            ListObjectsV2Request listRequest = ListObjectsV2Request.builder()
+                .bucket(this.config.getBucket())
+                .prefix(this.config.getPathPrefix())
+                .delimiter("/")
+                .build();
+            
+            ListObjectsV2Response response = this.s3Client.listObjectsV2(listRequest);
+            
+            templates = response.commonPrefixes().stream()
+                .map(commonPrefix -> {
+                    String prefix = commonPrefix.prefix();
+                    if (prefix.startsWith(this.config.getPathPrefix())) {
+                        prefix = prefix.substring(this.config.getPathPrefix().length());
+                    }
+                    if (prefix.endsWith("/")) {
+                        prefix = prefix.substring(0, prefix.length() - 1);
+                    }
+                    return prefix;
+                })
+                .filter(template -> !template.isEmpty())
+                .sorted()
+                .collect(Collectors.toList());
+                
+        } catch (S3Exception e) {
+            Logger.error("Failed to list templates from S3", e);
+        }
+        
+        return templates;
     }
 
     private S3Client createS3Client() {

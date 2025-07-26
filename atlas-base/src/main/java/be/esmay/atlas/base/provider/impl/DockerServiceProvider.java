@@ -49,6 +49,7 @@ import java.io.IOException;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -1411,10 +1412,6 @@ public final class DockerServiceProvider extends ServiceProvider {
     }
     
     private void cleanupDynamicVolumesOnShutdown(List<String> volumePaths) {
-        if (volumePaths.isEmpty()) {
-            return;
-        }
-        
         try {
             AtlasBase atlasInstance = AtlasBase.getInstance();
             if (atlasInstance != null && atlasInstance.getConfigManager() != null) {
@@ -1437,6 +1434,28 @@ public final class DockerServiceProvider extends ServiceProvider {
                     }
                 } catch (Exception e) {
                     Logger.warn("Failed to cleanup volume directory during shutdown {}: {}", volumePath, e.getMessage());
+                }
+            }
+            
+            Path serversDir = Paths.get("servers");
+            if (Files.exists(serversDir) && Files.isDirectory(serversDir)) {
+                try {
+                    DirectoryStream<Path> stream = Files.newDirectoryStream(serversDir);
+                    for (Path serverDir : stream) {
+                        String dirName = serverDir.getFileName().toString();
+                        if (Files.isDirectory(serverDir) && dirName.contains("#")) {
+                            try {
+                                directoryManager.deleteDirectoryRecursively(serverDir);
+                                cleanedCount++;
+                                Logger.debug("Cleaned up dynamic server directory: {}", dirName);
+                            } catch (Exception e) {
+                                Logger.warn("Failed to cleanup dynamic directory {}: {}", serverDir, e.getMessage());
+                            }
+                        }
+                    }
+                    stream.close();
+                } catch (Exception e) {
+                    Logger.error("Error scanning servers directory for cleanup: {}", e.getMessage());
                 }
             }
             
@@ -1666,6 +1685,11 @@ public final class DockerServiceProvider extends ServiceProvider {
                 String serverId = server.getServerId();
                 String containerId = this.serverContainerIds.get(serverId);
                 if (containerId != null && !actualContainerIds.contains(containerId)) {
+
+                    if (server.isShutdown()) {
+                        Logger.debug("Skipping zombie detection for server being shutdown: {}", server.getName());
+                        continue;
+                    }
 
                     if (server.getType() == ServerType.STATIC) {
                         boolean isManuallyStopped = false;

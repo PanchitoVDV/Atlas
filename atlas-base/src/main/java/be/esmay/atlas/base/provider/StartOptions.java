@@ -76,6 +76,7 @@ public final class StartOptions {
             .validateResources(true)
             .waitForReady(false)
             .cleanupOnFailure(true)
+            .addToTracking(false)
             .build();
     }
     

@@ -1,8 +1,13 @@
 package be.esmay.atlas.base.config.impl;
 
 import be.esmay.atlas.base.config.ConfigurateConfig;
+import be.esmay.atlas.base.utils.Logger;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
 import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Builder.Default;
 import org.spongepowered.configurate.objectmapping.ConfigSerializable;
 import org.spongepowered.configurate.objectmapping.meta.Setting;
 
@@ -21,7 +26,20 @@ public final class ScalerConfig extends ConfigurateConfig {
         this.group = this.loadOrCreateConfig("group", Group.class);
     }
 
+    public void updateAndSave() {
+        try {
+            this.rootNode.node("group").set(Group.class, this.group);
+            this.saveConfiguration();
+            Logger.debug("Configuration saved for group: {}", this.group.getName());
+        } catch (Exception e) {
+            Logger.error("Failed to save configuration updates for group: {}", this.group.getName(), e);
+        }
+    }
+
     @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     @ConfigSerializable
     public static class Group {
 
@@ -30,6 +48,7 @@ public final class ScalerConfig extends ConfigurateConfig {
         @Setting("display-name")
         private String displayName;
 
+        @Default
         private int priority = 0;
 
         private Server server;
@@ -44,6 +63,9 @@ public final class ScalerConfig extends ConfigurateConfig {
     }
 
     @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     @ConfigSerializable
     public static class Server {
 
@@ -60,6 +82,9 @@ public final class ScalerConfig extends ConfigurateConfig {
     }
 
     @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     @ConfigSerializable
     public static class Naming {
 
@@ -72,6 +97,9 @@ public final class ScalerConfig extends ConfigurateConfig {
     }
 
     @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     @ConfigSerializable
     public static class Scaling {
 
@@ -82,6 +110,9 @@ public final class ScalerConfig extends ConfigurateConfig {
     }
 
     @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     @ConfigSerializable
     public static class Conditions {
 
@@ -94,6 +125,9 @@ public final class ScalerConfig extends ConfigurateConfig {
     }
 
     @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     @ConfigSerializable
     public static class ServiceProvider {
 
@@ -102,6 +136,9 @@ public final class ScalerConfig extends ConfigurateConfig {
     }
 
     @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     @ConfigSerializable
     public static class Docker {
 

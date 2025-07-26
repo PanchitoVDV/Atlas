@@ -232,5 +232,61 @@ public final class ScalerManager {
                 .toList();
     }
 
+    public void loadScaler(String groupName) {
+        Scaler existingScaler = this.getScaler(groupName);
+        if (existingScaler != null) {
+            Logger.warn("Scaler {} is already loaded", groupName);
+            return;
+        }
+
+        File groupFile = new File("groups", groupName + ".yml");
+        if (!groupFile.exists()) {
+            Logger.error("Group configuration not found: " + groupFile.getPath());
+            return;
+        }
+
+        ScalerConfig scalerConfig = new ScalerConfig(groupFile.getParentFile(), groupFile.getName());
+        String type = scalerConfig.getGroup().getScaling().getType();
+        
+        if (type == null) {
+            Logger.error("No scaling type defined in group file " + groupFile.getName());
+            return;
+        }
+
+        Scaler scaler = ScalerRegistry.get(type, scalerConfig.getGroup().getDisplayName(), scalerConfig);
+        if (scaler == null) {
+            Logger.error("Failed to create scaler for type " + type + " in group file " + groupFile.getName());
+            return;
+        }
+
+        try {
+            ServiceProvider provider = this.atlasBase.getProviderManager().getProvider();
+            provider.ensureResourcesReady(scalerConfig.getGroup()).get();
+        } catch (Exception e) {
+            Logger.error("Failed to prepare resources for scaler {}: {}", scaler.getGroupName(), e.getMessage());
+            return;
+        }
+
+        this.scalers.add(scaler);
+        Logger.info("Loaded scaler {} with type {}", scaler.getGroupName(), type);
+    }
+
+    public void unloadScaler(String groupName) {
+        Scaler scaler = this.getScaler(groupName);
+        if (scaler == null) {
+            Logger.error("Scaler not found: " + groupName);
+            return;
+        }
+
+        try {
+            scaler.shutdown();
+        } catch (Exception e) {
+            Logger.error("Error shutting down scaler during unload: {}", scaler.getGroupName(), e);
+        }
+
+        this.scalers.remove(scaler);
+        Logger.info("Scaler {} unloaded successfully", groupName);
+    }
+
 }
 

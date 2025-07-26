@@ -128,6 +128,13 @@ public abstract class Scaler {
         String serverId = UUID.randomUUID().toString();
         Logger.info("Manually scaling up server: {} (ID: {}) for group: {}", serverName, serverId, this.groupName);
 
+        ServerInfo initialServerInfo = ServerInfo.builder()
+                .status(ServerStatus.STARTING)
+                .onlinePlayers(0)
+                .maxPlayers(20)
+                .onlinePlayerNames(new HashSet<>())
+                .build();
+
         AtlasServer server = AtlasServer.builder()
                 .serverId(serverId)
                 .name(serverName)
@@ -136,18 +143,24 @@ public abstract class Scaler {
                 .createdAt(System.currentTimeMillis())
                 .isManuallyScaled(true)
                 .shutdown(false)
+                .lastHeartbeat(System.currentTimeMillis())
+                .serverInfo(initialServerInfo)
                 .build();
+        
+        this.addServer(server);
+        Logger.debug("Added manual server to tracking before creation: {} with STARTING status", serverName);
         
         CompletableFuture<AtlasServer> createFuture = this.serviceProvider.startServerCompletely(server, StartOptions.scalingUp());
 
         CompletableFuture<Void> acceptFuture = createFuture.thenAccept(startedServer -> {
-            this.addServer(startedServer);
-            Logger.debug("Successfully created manual server: {}", startedServer.getName());
+            this.servers.put(startedServer.getServerId(), startedServer);
+            Logger.debug("Updated manual server after successful start: {}", startedServer.getName());
         });
 
         return acceptFuture.exceptionally(throwable -> {
             Logger.error("Failed to create manual server: {}", serverId, throwable);
             this.reservedNames.remove(serverName);
+            this.removeServerFromTracking(serverId);
             return null;
         });
     }
@@ -185,6 +198,13 @@ public abstract class Scaler {
         String serverId = UUID.randomUUID().toString();
         Logger.debug("Creating auto-scaled server: {} (ID: {}) for group: {}", serverName, serverId, this.groupName);
 
+        ServerInfo initialServerInfo = ServerInfo.builder()
+                .status(ServerStatus.STARTING)
+                .onlinePlayers(0)
+                .maxPlayers(20)
+                .onlinePlayerNames(new HashSet<>())
+                .build();
+
         AtlasServer server = AtlasServer.builder()
                 .serverId(serverId)
                 .name(serverName)
@@ -193,18 +213,24 @@ public abstract class Scaler {
                 .createdAt(System.currentTimeMillis())
                 .isManuallyScaled(false)
                 .shutdown(false)
+                .lastHeartbeat(System.currentTimeMillis())
+                .serverInfo(initialServerInfo)
                 .build();
+        
+        this.addServer(server);
+        Logger.debug("Added server to tracking before creation: {} with STARTING status", serverName);
         
         CompletableFuture<AtlasServer> createFuture = this.serviceProvider.startServerCompletely(server, StartOptions.scalingUp());
 
         CompletableFuture<Void> acceptFuture = createFuture.thenAccept(startedServer -> {
-            this.addServer(startedServer);
-            Logger.debug("Started server: {}", startedServer.getName());
+            this.servers.put(startedServer.getServerId(), startedServer);
+            Logger.debug("Updated server after successful start: {}", startedServer.getName());
         });
 
         return acceptFuture.exceptionally(throwable -> {
             Logger.error("Failed to create auto-scaled server: {}", serverId, throwable);
             this.reservedNames.remove(serverName);
+            this.removeServerFromTracking(serverId);
             return null;
         });
     }
@@ -789,6 +815,57 @@ public abstract class Scaler {
 
     public boolean isCurrentlyRestarting(String serverId) {
         return this.currentlyRestarting.contains(serverId);
+    }
+
+    public void setMinServers(int minServers) {
+        if (minServers < 0) {
+            throw new IllegalArgumentException("Minimum servers cannot be negative");
+        }
+        if (minServers > this.getMaxServers() && this.getMaxServers() != -1) {
+            throw new IllegalArgumentException("Min servers cannot exceed max servers");
+        }
+        this.scalerConfig.getGroup().getServer().setMinServers(minServers);
+        Logger.debug("Updated min servers to {} for group {}", minServers, this.groupName);
+    }
+
+    public void setMaxServers(int maxServers) {
+        if (maxServers < -1) {
+            throw new IllegalArgumentException("Maximum servers must be -1 (unlimited) or greater");
+        }
+        if (maxServers != -1 && maxServers < this.getMinServers()) {
+            throw new IllegalArgumentException("Max servers cannot be less than min servers");
+        }
+        int currentAutoServers = this.getAutoScaledServers().size();
+        if (maxServers != -1 && currentAutoServers > maxServers) {
+            Logger.warn("Current auto-scaled servers ({}) exceed new max servers ({}). Excess servers will be scaled down over time.", 
+                    currentAutoServers, maxServers);
+        }
+        this.scalerConfig.getGroup().getServer().setMaxServers(maxServers);
+        Logger.debug("Updated max servers to {} for group {}", maxServers == -1 ? "unlimited" : maxServers, this.groupName);
+    }
+
+    public void setScaleUpThreshold(double threshold) {
+        if (threshold < 0.0 || threshold > 1.0) {
+            throw new IllegalArgumentException("Scale up threshold must be between 0.0 and 1.0");
+        }
+        double scaleDownThreshold = this.scalerConfig.getGroup().getScaling().getConditions().getScaleDownThreshold();
+        if (threshold <= scaleDownThreshold) {
+            throw new IllegalArgumentException("Scale up threshold must be greater than scale down threshold");
+        }
+        this.scalerConfig.getGroup().getScaling().getConditions().setScaleUpThreshold(threshold);
+        Logger.debug("Updated scale up threshold to {} for group {}", threshold, this.groupName);
+    }
+
+    public void setScaleDownThreshold(double threshold) {
+        if (threshold < 0.0 || threshold > 1.0) {
+            throw new IllegalArgumentException("Scale down threshold must be between 0.0 and 1.0");
+        }
+        double scaleUpThreshold = this.scalerConfig.getGroup().getScaling().getConditions().getScaleUpThreshold();
+        if (threshold >= scaleUpThreshold) {
+            throw new IllegalArgumentException("Scale down threshold must be less than scale up threshold");
+        }
+        this.scalerConfig.getGroup().getScaling().getConditions().setScaleDownThreshold(threshold);
+        Logger.debug("Updated scale down threshold to {} for group {}", threshold, this.groupName);
     }
 
 }
