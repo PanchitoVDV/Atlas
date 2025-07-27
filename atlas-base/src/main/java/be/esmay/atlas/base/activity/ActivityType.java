@@ -12,6 +12,9 @@ public enum ActivityType {
     CAPACITY_REACHED,
     
     ERROR_EVENT,
-    ATLAS_LIFECYCLE
+    ATLAS_LIFECYCLE,
+    
+    @Deprecated
+    BACKUP_OPERATION
     
 }

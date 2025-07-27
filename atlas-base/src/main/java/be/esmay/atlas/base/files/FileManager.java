@@ -27,6 +27,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public final class FileManager {
     
+    private static final String TEMPLATES_DIR = "templates";
     private final Map<String, UploadSession> uploadSessions = new ConcurrentHashMap<>();
 
     public FileListResponse listFiles(String workingDirectory, String requestedPath) throws Exception {
@@ -552,6 +553,313 @@ public final class FileManager {
                         Logger.debug("Failed to delete upload temp file: " + path, e);
                     }
                 });
+        }
+    }
+
+    public FileListResponse listTemplateFiles(String requestedPath) throws Exception {
+        Path templatesBasePath = Paths.get(TEMPLATES_DIR).toAbsolutePath().normalize();
+        
+        if (!Files.exists(templatesBasePath)) {
+            Files.createDirectories(templatesBasePath);
+        }
+        
+        Path targetPath = this.resolveTemplatePath(templatesBasePath, requestedPath);
+        this.validatePathWithinTemplates(targetPath, templatesBasePath);
+        
+        if (!Files.exists(targetPath)) {
+            throw new IllegalArgumentException("Template path does not exist: " + requestedPath);
+        }
+        
+        if (!Files.isDirectory(targetPath)) {
+            throw new IllegalArgumentException("Template path is not a directory: " + requestedPath);
+        }
+
+        List<FileInfo> fileInfos = new ArrayList<>();
+        
+        try (var directoryStream = Files.newDirectoryStream(targetPath)) {
+            for (Path filePath : directoryStream) {
+                FileInfo fileInfo = this.createFileInfo(filePath);
+                fileInfos.add(fileInfo);
+            }
+        }
+
+        fileInfos.sort((a, b) -> {
+            if (a.isFile() != b.isFile()) {
+                return a.isFile() ? 1 : -1;
+            }
+            return a.getName().compareToIgnoreCase(b.getName());
+        });
+        
+        return FileListResponse.builder()
+            .path(requestedPath)
+            .files(fileInfos)
+            .build();
+    }
+
+    public String readTemplateFileContents(String requestedFilePath) throws Exception {
+        Path templatesBasePath = Paths.get(TEMPLATES_DIR).toAbsolutePath().normalize();
+        Path targetPath = this.resolveTemplatePath(templatesBasePath, requestedFilePath);
+        
+        this.validatePathWithinTemplates(targetPath, templatesBasePath);
+        
+        if (!Files.exists(targetPath)) {
+            throw new IllegalArgumentException("Template file does not exist: " + requestedFilePath);
+        }
+        
+        if (!Files.isRegularFile(targetPath)) {
+            throw new IllegalArgumentException("Template path is not a regular file: " + requestedFilePath);
+        }
+
+        try {
+            return Files.readString(targetPath);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to read template file contents: " + e.getMessage(), e);
+        }
+    }
+
+    public void writeTemplateFileContents(String requestedFilePath, String content) throws Exception {
+        Path templatesBasePath = Paths.get(TEMPLATES_DIR).toAbsolutePath().normalize();
+        
+        if (!Files.exists(templatesBasePath)) {
+            Files.createDirectories(templatesBasePath);
+        }
+        
+        Path targetPath = this.resolveTemplatePath(templatesBasePath, requestedFilePath);
+        this.validatePathWithinTemplates(targetPath, templatesBasePath);
+
+        Path parentDir = targetPath.getParent();
+        if (parentDir != null && !Files.exists(parentDir)) {
+            Files.createDirectories(parentDir);
+        }
+
+        try {
+            Files.writeString(targetPath, content);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to write template file contents: " + e.getMessage(), e);
+        }
+    }
+
+    public void deleteTemplateFile(String requestedFilePath) throws Exception {
+        Path templatesBasePath = Paths.get(TEMPLATES_DIR).toAbsolutePath().normalize();
+        Path targetPath = this.resolveTemplatePath(templatesBasePath, requestedFilePath);
+        
+        this.validatePathWithinTemplates(targetPath, templatesBasePath);
+        
+        if (!Files.exists(targetPath)) {
+            throw new IllegalArgumentException("Template file does not exist: " + requestedFilePath);
+        }
+
+        try {
+            if (Files.isDirectory(targetPath)) {
+                Files.walk(targetPath)
+                    .sorted(java.util.Comparator.reverseOrder())
+                    .forEach(path -> {
+                        try {
+                            Files.delete(path);
+                        } catch (Exception e) {
+                            throw new RuntimeException("Failed to delete: " + path, e);
+                        }
+                    });
+            } else {
+                Files.delete(targetPath);
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to delete template file/directory: " + e.getMessage(), e);
+        }
+    }
+
+    public void downloadTemplateFile(RoutingContext context, String requestedFilePath) throws Exception {
+        Path templatesBasePath = Paths.get(TEMPLATES_DIR).toAbsolutePath().normalize();
+        Path targetPath = this.resolveTemplatePath(templatesBasePath, requestedFilePath);
+        
+        this.validatePathWithinTemplates(targetPath, templatesBasePath);
+        
+        if (!Files.exists(targetPath)) {
+            throw new IllegalArgumentException("Template file does not exist: " + requestedFilePath);
+        }
+        
+        if (!Files.isRegularFile(targetPath)) {
+            throw new IllegalArgumentException("Template path is not a regular file: " + requestedFilePath);
+        }
+
+        String fileName = targetPath.getFileName().toString();
+
+        String contentType;
+        try {
+            contentType = Files.probeContentType(targetPath);
+            if (contentType == null) {
+                contentType = "application/octet-stream";
+            }
+        } catch (Exception e) {
+            contentType = "application/octet-stream";
+        }
+
+        try {
+            byte[] fileBytes = Files.readAllBytes(targetPath);
+            
+            context.response()
+                .putHeader("Content-Type", contentType)
+                .putHeader("Content-Disposition", "attachment; filename=\"" + fileName + "\"")
+                .putHeader("Content-Length", String.valueOf(fileBytes.length))
+                .end(io.vertx.core.buffer.Buffer.buffer(fileBytes));
+                
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to read template file for download: " + e.getMessage(), e);
+        }
+    }
+
+    public CompletableFuture<Long> uploadTemplateFileStream(String targetPath, ReadStream<Buffer> bodyStream) throws Exception {
+        Path templatesBasePath = Paths.get(TEMPLATES_DIR).toAbsolutePath().normalize();
+        
+        if (!Files.exists(templatesBasePath)) {
+            Files.createDirectories(templatesBasePath);
+        }
+        
+        Path targetFilePath = this.resolveTemplatePath(templatesBasePath, targetPath);
+        this.validatePathWithinTemplates(targetFilePath, templatesBasePath);
+
+        Path parentDir = targetFilePath.getParent();
+        if (parentDir != null && !Files.exists(parentDir)) {
+            Files.createDirectories(parentDir);
+        }
+
+        if (Files.exists(targetFilePath) && Files.isDirectory(targetFilePath)) {
+            throw new IllegalArgumentException("Cannot upload template file: target is a directory: " + targetPath);
+        }
+
+        CompletableFuture<Long> future = new CompletableFuture<>();
+        final long maxFileSize = 8L * 1024 * 1024 * 1024; // 8GB limit
+        
+        try {
+            FileChannel fileChannel = FileChannel.open(targetFilePath, 
+                StandardOpenOption.CREATE, 
+                StandardOpenOption.WRITE, 
+                StandardOpenOption.TRUNCATE_EXISTING);
+            
+            final long[] totalBytesWritten = {0};
+            
+            bodyStream.handler(buffer -> {
+                try {
+                    if (totalBytesWritten[0] + buffer.length() > maxFileSize) {
+                        try {
+                            fileChannel.close();
+                            Files.deleteIfExists(targetFilePath);
+                        } catch (IOException e) {
+                            Logger.error("Failed to cleanup after size limit exceeded", e);
+                        }
+                        future.completeExceptionally(new RuntimeException("File size exceeds maximum limit of 8GB"));
+                        return;
+                    }
+
+                    int bytesWritten = fileChannel.write(buffer.getByteBuf().nioBuffer());
+                    totalBytesWritten[0] += bytesWritten;
+                } catch (IOException e) {
+                    Logger.error("Failed to write chunk to template file: " + targetPath, e);
+                    try {
+                        fileChannel.close();
+                        Files.deleteIfExists(targetFilePath);
+                    } catch (IOException closeEx) {
+                        Logger.error("Failed to close file channel", closeEx);
+                    }
+                    future.completeExceptionally(new RuntimeException("Failed to write to template file: " + e.getMessage(), e));
+                }
+            });
+            
+            bodyStream.endHandler(v -> {
+                try {
+                    fileChannel.close();
+                    future.complete(totalBytesWritten[0]);
+                } catch (Exception e) {
+                    Logger.error("Failed to finalize template file upload: " + targetPath, e);
+                    future.completeExceptionally(new RuntimeException("Failed to finalize upload: " + e.getMessage(), e));
+                }
+            });
+            
+            bodyStream.exceptionHandler(throwable -> {
+                try {
+                    fileChannel.close();
+                } catch (IOException e) {
+                    Logger.error("Failed to close file channel after exception", e);
+                }
+                future.completeExceptionally(new RuntimeException("Template upload failed: " + throwable.getMessage(), throwable));
+            });
+            
+        } catch (Exception e) {
+            future.completeExceptionally(new RuntimeException("Failed to open template file for upload: " + e.getMessage(), e));
+        }
+        
+        return future;
+    }
+
+    public void createTemplateDirectory(String directoryPath) throws Exception {
+        Path templatesBasePath = Paths.get(TEMPLATES_DIR).toAbsolutePath().normalize();
+        
+        if (!Files.exists(templatesBasePath)) {
+            Files.createDirectories(templatesBasePath);
+        }
+        
+        Path targetDirPath = this.resolveTemplatePath(templatesBasePath, directoryPath);
+        this.validatePathWithinTemplates(targetDirPath, templatesBasePath);
+        
+        if (Files.exists(targetDirPath)) {
+            if (Files.isDirectory(targetDirPath)) {
+                throw new IllegalArgumentException("Template directory already exists: " + directoryPath);
+            } else {
+                throw new IllegalArgumentException("Cannot create template directory: file exists with same name: " + directoryPath);
+            }
+        }
+
+        try {
+            Files.createDirectories(targetDirPath);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to create template directory: " + e.getMessage(), e);
+        }
+    }
+
+    public void renameTemplateFile(String oldFilePath, String newFilePath) throws Exception {
+        Path templatesBasePath = Paths.get(TEMPLATES_DIR).toAbsolutePath().normalize();
+        Path oldTargetPath = this.resolveTemplatePath(templatesBasePath, oldFilePath);
+        Path newTargetPath = this.resolveTemplatePath(templatesBasePath, newFilePath);
+
+        this.validatePathWithinTemplates(oldTargetPath, templatesBasePath);
+        this.validatePathWithinTemplates(newTargetPath, templatesBasePath);
+        
+        if (!Files.exists(oldTargetPath)) {
+            throw new IllegalArgumentException("Source template file does not exist: " + oldFilePath);
+        }
+        
+        if (Files.exists(newTargetPath)) {
+            throw new IllegalArgumentException("Destination template already exists: " + newFilePath);
+        }
+
+        Path newParentDir = newTargetPath.getParent();
+        if (newParentDir != null && !Files.exists(newParentDir)) {
+            Files.createDirectories(newParentDir);
+        }
+
+        try {
+            Files.move(oldTargetPath, newTargetPath);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to rename/move template file: " + e.getMessage(), e);
+        }
+    }
+    
+    private Path resolveTemplatePath(Path templatesBasePath, String requestedPath) {
+        String normalizedPath = requestedPath;
+        if (normalizedPath.equals("/") || normalizedPath.isEmpty()) {
+            normalizedPath = ".";
+        }
+
+        if (normalizedPath.startsWith("/")) {
+            normalizedPath = normalizedPath.substring(1);
+        }
+        
+        return templatesBasePath.resolve(normalizedPath).normalize();
+    }
+    
+    private void validatePathWithinTemplates(Path targetPath, Path templatesBasePath) {
+        if (!targetPath.startsWith(templatesBasePath)) {
+            throw new SecurityException("Path traversal detected: requested path is outside templates directory");
         }
     }
 }

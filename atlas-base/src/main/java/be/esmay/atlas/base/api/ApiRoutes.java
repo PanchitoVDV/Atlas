@@ -86,6 +86,15 @@ public final class ApiRoutes {
         this.router.get("/api/v1/activity/recent").handler(this::getRecentActivity);
         this.router.get("/api/v1/activity/servers/:id").handler(this::getServerActivity);
         this.router.get("/api/v1/activity/groups/:name").handler(this::getGroupActivity);
+        
+        this.router.get("/api/v1/templates/files").handler(this::getTemplateFiles);
+        this.router.get("/api/v1/templates/files/contents").handler(this::getTemplateFileContents);
+        this.router.put("/api/v1/templates/files/contents").handler(this::writeTemplateFileContents);
+        this.router.delete("/api/v1/templates/files/contents").handler(this::deleteTemplateFile);
+        this.router.get("/api/v1/templates/files/download").handler(this::downloadTemplateFile);
+        this.router.post("/api/v1/templates/files/mkdir").handler(this::createTemplateDirectory);
+        this.router.post("/api/v1/templates/files/rename").handler(this::renameTemplateFile);
+        this.router.post("/api/v1/templates/files/upload").handler(this::uploadTemplateFileWithAuth);
 
         this.router.post("/api/v1/servers").handler(this::createServers);
         this.router.post("/api/v1/servers/:id/start").handler(this::startServer);
@@ -1600,5 +1609,272 @@ public final class ApiRoutes {
             .description(activity.getDescription())
             .metadata(metadata)
             .build();
+    }
+
+    private void getTemplateFiles(RoutingContext context) {
+        String path = context.request().getParam("path");
+
+        if (path == null || path.isEmpty()) {
+            path = "/";
+        }
+
+        final String finalPath = path;
+
+        if (!this.fileManager.isValidPath(finalPath)) {
+            this.sendError(context, "Invalid path: directory traversal not allowed", 400);
+            return;
+        }
+
+        try {
+            FileListResponse response = this.fileManager.listTemplateFiles(finalPath);
+            this.sendResponse(context, ApiResponse.success(response));
+        } catch (SecurityException e) {
+            Logger.warn("Security violation: attempted directory traversal in templates at path {}: {}", finalPath, e.getMessage());
+            this.sendError(context, "Security violation: " + e.getMessage(), 403);
+        } catch (Exception e) {
+            Logger.error("Failed to list template files at path " + finalPath, e);
+            this.sendError(context, "Failed to list template files: " + e.getMessage());
+        }
+    }
+
+    private void getTemplateFileContents(RoutingContext context) {
+        String filePath = context.request().getParam("file");
+
+        if (filePath == null || filePath.isEmpty()) {
+            this.sendError(context, "File parameter is required", 400);
+            return;
+        }
+
+        if (!this.fileManager.isValidPath(filePath)) {
+            this.sendError(context, "Invalid file path: directory traversal not allowed", 400);
+            return;
+        }
+
+        try {
+            String fileContents = this.fileManager.readTemplateFileContents(filePath);
+
+            context.response()
+                    .putHeader("Content-Type", "text/plain; charset=utf-8")
+                    .end(fileContents);
+
+        } catch (SecurityException e) {
+            Logger.warn("Security violation: attempted file access outside templates directory at path {}: {}", filePath, e.getMessage());
+            this.sendError(context, "Security violation: " + e.getMessage(), 403);
+        } catch (Exception e) {
+            Logger.error("Failed to read template file contents at path {}", filePath, e);
+            this.sendError(context, "Failed to read template file: " + e.getMessage());
+        }
+    }
+
+    private void writeTemplateFileContents(RoutingContext context) {
+        String filePath = context.request().getParam("file");
+
+        if (filePath == null || filePath.isEmpty()) {
+            this.sendError(context, "File parameter is required", 400);
+            return;
+        }
+
+        if (!this.fileManager.isValidPath(filePath)) {
+            this.sendError(context, "Invalid file path: directory traversal not allowed", 400);
+            return;
+        }
+
+        String content = context.body().asString();
+        if (content == null) {
+            content = "";
+        }
+
+        try {
+            this.fileManager.writeTemplateFileContents(filePath, content);
+            this.sendResponse(context, ApiResponse.success(null, "Template file written successfully"));
+
+        } catch (SecurityException e) {
+            Logger.warn("Security violation: attempted file write outside templates directory at path {}: {}", filePath, e.getMessage());
+            this.sendError(context, "Security violation: " + e.getMessage(), 403);
+        } catch (Exception e) {
+            Logger.error("Failed to write template file contents at path {}", filePath, e);
+            this.sendError(context, "Failed to write template file: " + e.getMessage());
+        }
+    }
+
+    private void deleteTemplateFile(RoutingContext context) {
+        String filePath = context.request().getParam("file");
+
+        if (filePath == null || filePath.isEmpty()) {
+            this.sendError(context, "File parameter is required", 400);
+            return;
+        }
+
+        if (!this.fileManager.isValidPath(filePath)) {
+            this.sendError(context, "Invalid file path: directory traversal not allowed", 400);
+            return;
+        }
+
+        try {
+            this.fileManager.deleteTemplateFile(filePath);
+            this.sendResponse(context, ApiResponse.success(null, "Template file deleted successfully"));
+
+        } catch (SecurityException e) {
+            Logger.warn("Security violation: attempted file deletion outside templates directory at path {}: {}", filePath, e.getMessage());
+            this.sendError(context, "Security violation: " + e.getMessage(), 403);
+        } catch (Exception e) {
+            Logger.error("Failed to delete template file at path {}", filePath, e);
+            this.sendError(context, "Failed to delete template file: " + e.getMessage());
+        }
+    }
+
+    private void downloadTemplateFile(RoutingContext context) {
+        String filePath = context.request().getParam("file");
+
+        if (filePath == null || filePath.isEmpty()) {
+            this.sendError(context, "File parameter is required", 400);
+            return;
+        }
+
+        if (!this.fileManager.isValidPath(filePath)) {
+            this.sendError(context, "Invalid file path: directory traversal not allowed", 400);
+            return;
+        }
+
+        try {
+            this.fileManager.downloadTemplateFile(context, filePath);
+
+        } catch (SecurityException e) {
+            Logger.warn("Security violation: attempted file download outside templates directory at path {}: {}", filePath, e.getMessage());
+            this.sendError(context, "Security violation: " + e.getMessage(), 403);
+        } catch (Exception e) {
+            Logger.error("Failed to download template file at path {}", filePath, e);
+            this.sendError(context, "Failed to download template file: " + e.getMessage());
+        }
+    }
+
+    private void createTemplateDirectory(RoutingContext context) {
+        JsonObject body = context.body().asJsonObject();
+
+        if (body == null) {
+            this.sendError(context, "Request body is required", 400);
+            return;
+        }
+
+        String directoryPath = body.getString("path");
+
+        if (directoryPath == null || directoryPath.isEmpty()) {
+            this.sendError(context, "Path is required", 400);
+            return;
+        }
+
+        if (!this.fileManager.isValidPath(directoryPath)) {
+            this.sendError(context, "Invalid directory path: directory traversal not allowed", 400);
+            return;
+        }
+
+        try {
+            this.fileManager.createTemplateDirectory(directoryPath);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("path", directoryPath);
+
+            this.sendResponse(context, ApiResponse.success(response, "Template directory created successfully"));
+
+        } catch (SecurityException e) {
+            Logger.warn("Security violation: attempted directory creation outside templates directory at path {}: {}", directoryPath, e.getMessage());
+            this.sendError(context, "Security violation: " + e.getMessage(), 403);
+        } catch (Exception e) {
+            Logger.error("Failed to create template directory at path {}", directoryPath, e);
+            this.sendError(context, "Failed to create template directory: " + e.getMessage());
+        }
+    }
+
+    private void renameTemplateFile(RoutingContext context) {
+        JsonObject body = context.body().asJsonObject();
+
+        if (body == null) {
+            this.sendError(context, "Request body is required", 400);
+            return;
+        }
+
+        String oldPath = body.getString("oldPath");
+        String newPath = body.getString("newPath");
+
+        if (oldPath == null || oldPath.isEmpty()) {
+            this.sendError(context, "oldPath is required", 400);
+            return;
+        }
+
+        if (newPath == null || newPath.isEmpty()) {
+            this.sendError(context, "newPath is required", 400);
+            return;
+        }
+
+        if (!this.fileManager.isValidPath(oldPath) || !this.fileManager.isValidPath(newPath)) {
+            this.sendError(context, "Invalid file path: directory traversal not allowed", 400);
+            return;
+        }
+
+        try {
+            this.fileManager.renameTemplateFile(oldPath, newPath);
+            this.sendResponse(context, ApiResponse.success(null, "Template file renamed successfully"));
+
+        } catch (SecurityException e) {
+            Logger.warn("Security violation: attempted file rename outside templates directory from {} to {}: {}", oldPath, newPath, e.getMessage());
+            this.sendError(context, "Security violation: " + e.getMessage(), 403);
+        } catch (Exception e) {
+            Logger.error("Failed to rename template file from {} to {}", oldPath, newPath, e);
+            this.sendError(context, "Failed to rename template file: " + e.getMessage());
+        }
+    }
+
+    private void uploadTemplateFileWithAuth(RoutingContext context) {
+        String authHeader = context.request().getHeader("Authorization");
+        String token = this.authHandler.extractBearerToken(authHeader);
+
+        if (!this.authHandler.isValidToken(token)) {
+            this.sendError(context, "Unauthorized: Invalid or missing API key", 401);
+            return;
+        }
+
+        this.uploadTemplateFile(context);
+    }
+
+    private void uploadTemplateFile(RoutingContext context) {
+        String targetPath = context.request().getParam("path");
+
+        if (targetPath == null || targetPath.isEmpty()) {
+            this.sendError(context, "Path parameter is required", 400);
+            return;
+        }
+
+        if (!this.fileManager.isValidPath(targetPath)) {
+            this.sendError(context, "Invalid file path: directory traversal not allowed", 400);
+            return;
+        }
+
+        try {
+            this.fileManager.uploadTemplateFileStream(targetPath, context.request())
+                    .thenAccept(fileSize -> {
+                        Map<String, Object> response = new HashMap<>();
+                        response.put("path", targetPath);
+                        response.put("size", fileSize);
+
+                        this.sendResponse(context, ApiResponse.success(response, "Template file uploaded successfully"));
+                    })
+                    .exceptionally(throwable -> {
+                        if (throwable.getCause() instanceof SecurityException) {
+                            Logger.warn("Security violation: attempted file upload outside templates directory at path {}: {}", targetPath, throwable.getMessage());
+                            this.sendError(context, "Security violation: " + throwable.getCause().getMessage(), 403);
+                        } else {
+                            Logger.error("Failed to upload template file at path {}", targetPath, throwable);
+                            this.sendError(context, "Failed to upload template file: " + throwable.getMessage());
+                        }
+                        return null;
+                    });
+
+        } catch (SecurityException e) {
+            Logger.warn("Security violation: attempted file upload outside templates directory at path {}: {}", targetPath, e.getMessage());
+            this.sendError(context, "Security violation: " + e.getMessage(), 403);
+        } catch (Exception e) {
+            Logger.error("Failed to upload template file at path {}", targetPath, e);
+            this.sendError(context, "Failed to upload template file: " + e.getMessage());
+        }
     }
 }
