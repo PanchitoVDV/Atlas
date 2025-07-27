@@ -96,6 +96,9 @@ public final class AtlasConfig extends ConfigurateConfig {
         @Setting("socket-path")
         private String socketPath;
 
+        @Setting("host-ip-override")
+        private String hostIpOverride;
+
     }
 
     @Getter

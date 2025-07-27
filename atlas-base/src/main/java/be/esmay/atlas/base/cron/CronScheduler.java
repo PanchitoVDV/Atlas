@@ -61,7 +61,7 @@ public final class CronScheduler {
             return;
         }
 
-        String groupName = group.getName();
+        String groupName = scaler.getGroupName();
         Logger.info("Scheduling {} cron jobs for group: {}", cronJobs.size(), groupName);
 
         for (ScalerConfig.CronJob cronJob : cronJobs) {

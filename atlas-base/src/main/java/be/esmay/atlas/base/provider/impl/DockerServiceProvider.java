@@ -1129,6 +1129,11 @@ public final class DockerServiceProvider extends ServiceProvider {
     }
 
     private String determineHostIpForContainers() {
+        if (this.dockerConfig.getHostIpOverride() != null && !this.dockerConfig.getHostIpOverride().isEmpty()) {
+            Logger.info("Using configured host IP override for Atlas host: {}", this.dockerConfig.getHostIpOverride());
+            return this.dockerConfig.getHostIpOverride();
+        }
+
         try {
             Network network = this.dockerClient.inspectNetworkCmd().withNetworkId(this.dockerConfig.getNetwork()).exec();
             if (network != null && network.getIpam() != null && network.getIpam().getConfig() != null) {
