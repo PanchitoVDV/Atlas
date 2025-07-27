@@ -60,6 +60,8 @@ public final class ApiRoutes {
 
         this.router.put("/api/v1/servers/:id/files/upload/:uploadId/chunk/:chunkNumber").handler(this::uploadChunkWithAuth);
 
+        this.router.post("/api/v1/templates/files/upload").handler(this::uploadTemplateFileWithAuth);
+
         this.router.route("/api/v1/*").handler(BodyHandler.create());
         this.router.route("/api/v1/*").handler(this.authHandler.authenticate());
 
@@ -94,7 +96,6 @@ public final class ApiRoutes {
         this.router.get("/api/v1/templates/files/download").handler(this::downloadTemplateFile);
         this.router.post("/api/v1/templates/files/mkdir").handler(this::createTemplateDirectory);
         this.router.post("/api/v1/templates/files/rename").handler(this::renameTemplateFile);
-        this.router.post("/api/v1/templates/files/upload").handler(this::uploadTemplateFileWithAuth);
 
         this.router.post("/api/v1/servers").handler(this::createServers);
         this.router.post("/api/v1/servers/:id/start").handler(this::startServer);
