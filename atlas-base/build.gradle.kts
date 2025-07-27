@@ -24,6 +24,7 @@ dependencies {
     implementation("software.amazon.awssdk:s3:2.26.0")
     implementation("software.amazon.awssdk:core:2.26.0")
     implementation("software.amazon.awssdk:auth:2.26.0")
+    
 
     implementation("com.h2database:h2:2.2.224")
     implementation("org.hibernate:hibernate-core:6.4.1.Final")

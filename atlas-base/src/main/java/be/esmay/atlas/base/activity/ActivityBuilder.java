@@ -88,12 +88,6 @@ public final class ActivityBuilder {
         return this;
     }
 
-    public ActivityBuilder backupDetails(long sizeBytes, int durationSeconds, String format) {
-        this.metadata.put("backup_size_bytes", sizeBytes);
-        this.metadata.put("duration_seconds", durationSeconds);
-        this.metadata.put("compression_format", format);
-        return this;
-    }
 
     public ActivityBuilder errorDetails(String errorType, String errorMessage) {
         this.metadata.put("error_type", errorType);

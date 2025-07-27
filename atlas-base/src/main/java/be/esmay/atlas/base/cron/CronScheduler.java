@@ -1,7 +1,6 @@
 package be.esmay.atlas.base.cron;
 
 import be.esmay.atlas.base.AtlasBase;
-import be.esmay.atlas.base.backup.BackupManager;
 import be.esmay.atlas.base.config.impl.ScalerConfig;
 import be.esmay.atlas.base.scaler.Scaler;
 import be.esmay.atlas.base.server.ServerManager;
@@ -26,14 +25,12 @@ import java.util.concurrent.TimeUnit;
 public final class CronScheduler {
 
     private final AtlasBase atlasBase;
-    private final BackupManager backupManager;
     private ScheduledExecutorService executor;
     private final Map<String, ScheduledFuture<?>> scheduledJobs = new ConcurrentHashMap<>();
     private volatile boolean isShuttingDown = false;
 
     public CronScheduler(AtlasBase atlasBase) {
         this.atlasBase = atlasBase;
-        this.backupManager = new BackupManager();
     }
 
     public void initialize() {
@@ -171,7 +168,7 @@ public final class CronScheduler {
         switch (actionType.toLowerCase()) {
             case "server-control" -> this.executeServerControlAction(groupName, cronJob, step);
             case "server-command" -> this.executeServerCommandAction(groupName, cronJob, step);
-            case "backup" -> this.executeBackupAction(groupName, cronJob, step);
+            case "backup" -> Logger.warn("Backup functionality has been removed");
             default -> Logger.warn("Unknown action type: {} for step {} in cron job: {} in group: {}", 
                     actionType, stepNumber, cronJob.getName(), groupName);
         }
@@ -266,59 +263,6 @@ public final class CronScheduler {
         }
     }
 
-    private void executeBackupAction(String groupName, ScalerConfig.CronJob cronJob, ScalerConfig.CronStep step) {
-        ScalerConfig.BackupAction backupAction = step.getBackup();
-        if (backupAction == null) {
-            Logger.warn("No backup action specified for cron job: {} in group: {}", 
-                    cronJob.getName(), groupName);
-            return;
-        }
-
-        String target = cronJob.getTarget();
-
-        if (target.equals("servers")) {
-            List<AtlasServer> servers = this.atlasBase.getScalerManager().getServersByGroupFromTracking(groupName);
-            
-            for (AtlasServer server : servers) {
-                try {
-                    Logger.info("Starting backup for server: {} from cron job: {}", 
-                            server.getName(), cronJob.getName());
-                    
-                    CompletableFuture<Void> backupFuture = this.backupManager.executeServerBackup(server, backupAction, cronJob.getName());
-                    backupFuture.exceptionally(throwable -> {
-                        Logger.error("Failed to backup server: {} for cron job: {}", 
-                                server.getName(), cronJob.getName(), throwable);
-                        return null;
-                    });
-                    
-                } catch (Exception e) {
-                    Logger.error("Failed to start backup for server: {} for cron job: {}", 
-                            server.getName(), cronJob.getName(), e);
-                }
-            }
-        } else if (target.equals("group")) {
-            try {
-                List<AtlasServer> servers = this.atlasBase.getScalerManager().getServersByGroupFromTracking(groupName);
-                
-                Logger.info("Starting group backup for group: {} from cron job: {}", 
-                        groupName, cronJob.getName());
-                
-                CompletableFuture<Void> backupFuture = this.backupManager.executeGroupBackup(groupName, servers, backupAction, cronJob.getName());
-                backupFuture.exceptionally(throwable -> {
-                    Logger.error("Failed to backup group: {} for cron job: {}", 
-                            groupName, cronJob.getName(), throwable);
-                    return null;
-                });
-                
-            } catch (Exception e) {
-                Logger.error("Failed to start group backup for group: {} for cron job: {}", 
-                        groupName, cronJob.getName(), e);
-            }
-        } else {
-            Logger.warn("Target '{}' not supported for backup actions in cron job: {} in group: {}", 
-                    target, cronJob.getName(), groupName);
-        }
-    }
 
     public void unscheduleCronJobsForGroup(String groupName) {
         this.scheduledJobs.entrySet().removeIf(entry -> {
@@ -367,7 +311,6 @@ public final class CronScheduler {
             }
         }
 
-        this.backupManager.shutdown();
     }
 
     public boolean executeJobManually(String groupName, String jobName) {

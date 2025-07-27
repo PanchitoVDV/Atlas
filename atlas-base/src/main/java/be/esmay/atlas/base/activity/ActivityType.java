@@ -4,7 +4,6 @@ public enum ActivityType {
     
     SCALING_OPERATION,
     SERVER_RESTART,
-    BACKUP_OPERATION,
     MAINTENANCE_OPERATION,
     
     PLAYER_SURGE,
