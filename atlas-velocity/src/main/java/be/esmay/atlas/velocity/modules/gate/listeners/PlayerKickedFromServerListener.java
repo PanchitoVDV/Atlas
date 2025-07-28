@@ -10,6 +10,7 @@ import com.velocitypowered.api.event.player.KickedFromServerEvent;
 import com.velocitypowered.api.proxy.server.RegisteredServer;
 import lombok.RequiredArgsConstructor;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 
 @RequiredArgsConstructor
 public final class PlayerKickedFromServerListener extends AbstractListener {
@@ -18,8 +19,10 @@ public final class PlayerKickedFromServerListener extends AbstractListener {
 
     @Subscribe(order = PostOrder.FIRST)
     public void onKickedFromServer(KickedFromServerEvent event) {
+        PlainTextComponentSerializer plainTextComponentSerializer = PlainTextComponentSerializer.plainText();
+
         Component reason = ChatUtils.format(String.join("\n", this.gateModule.getPlugin().getMessagesConfiguration().getKickedMessage()),
-                event.getServer().getServerInfo().getName(), event.getServerKickReason().orElse(ChatUtils.format("Unknown reason.")));
+                event.getServer().getServerInfo().getName(), event.getServerKickReason().map(plainTextComponentSerializer::serialize).orElse("Unknown reason."));
 
         AtlasServer selectedServer = this.gateModule.getNextServerInGroup(this.gateModule.getPlugin().getDefaultConfiguration().getLobbyGroup(), event.getServer().getServerInfo().getName());
         if (selectedServer == null) {
