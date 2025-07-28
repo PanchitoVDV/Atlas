@@ -28,7 +28,7 @@ public final class GateModule extends VelocityModule<AtlasVelocityPlugin> {
 
         CommandManager commandManager = this.getPlugin().getProxyServer().getCommandManager();
         CommandMeta commandMeta = commandManager.metaBuilder("lobby")
-                .aliases("l", "hub", "spawn", "leave")
+                .aliases("l", "hub", "leave")
                 .plugin(this.getPlugin())
                 .build();
 
