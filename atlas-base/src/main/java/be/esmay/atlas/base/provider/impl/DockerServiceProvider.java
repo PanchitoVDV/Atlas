@@ -30,6 +30,7 @@ import com.github.dockerjava.api.model.Bind;
 import com.github.dockerjava.api.model.Container;
 import com.github.dockerjava.api.model.ContainerNetwork;
 import com.github.dockerjava.api.model.CpuStatsConfig;
+import com.github.dockerjava.api.model.ExposedPort;
 import com.github.dockerjava.api.model.Frame;
 import com.github.dockerjava.api.model.Info;
 import com.github.dockerjava.api.model.Network;
@@ -269,12 +270,12 @@ public final class DockerServiceProvider extends ServiceProvider {
                     }
 
                     Logger.debug("Stopping container for static server: {} (container: {})", atlasServer.getName(), containerId.substring(0, 12));
-                    
+
                     this.dockerClient.stopContainerCmd(containerId).withTimeout(30).exec();
                     Logger.info("Successfully stopped static server container: {}", atlasServer.getName());
 
                     this.waitForContainerStop(atlasServer, containerId);
-                    
+
                 } catch (Exception e) {
                     Logger.error("Failed to stop static server: {}", atlasServer.getName(), e);
                     throw new RuntimeException("Failed to stop static server: " + atlasServer.getName(), e);
@@ -409,10 +410,10 @@ public final class DockerServiceProvider extends ServiceProvider {
 
         if (containerId == null) {
             Logger.warn("Container ID not found for server: {} - assuming already deleted", containerName);
-            
+
             boolean shouldCleanupDirectory = false;
             String volumePath = null;
-            
+
             if (server.getType() == ServerType.DYNAMIC && options.isCleanupDirectory() && options.getReason() != DeletionReason.SERVER_RESTART && server.getWorkingDirectory() != null) {
                 shouldCleanupDirectory = true;
                 volumePath = server.getWorkingDirectory();
@@ -421,7 +422,7 @@ public final class DockerServiceProvider extends ServiceProvider {
                 }
                 Logger.debug("Enabling directory cleanup for dynamic server {} (container already gone)", server.getName());
             }
-            
+
             return new DeletionContext(serverId, null, containerName, false, shouldCleanupDirectory, volumePath);
         }
 
@@ -601,15 +602,15 @@ public final class DockerServiceProvider extends ServiceProvider {
 
     @Override
     public CompletableFuture<List<AtlasServer>> getAllServers() {
-        return CompletableFuture.supplyAsync(() -> 
-            AtlasBase.getInstance().getScalerManager().getAllServersFromTracking()
+        return CompletableFuture.supplyAsync(() ->
+                AtlasBase.getInstance().getScalerManager().getAllServersFromTracking()
         );
     }
 
     @Override
     public CompletableFuture<List<AtlasServer>> getServersByGroup(String group) {
-        return CompletableFuture.supplyAsync(() -> 
-            AtlasBase.getInstance().getScalerManager().getServersByGroupFromTracking(group)
+        return CompletableFuture.supplyAsync(() ->
+                AtlasBase.getInstance().getScalerManager().getServersByGroupFromTracking(group)
         );
     }
 
@@ -665,11 +666,11 @@ public final class DockerServiceProvider extends ServiceProvider {
 
                 long memoryUsed = stats.getMemoryStats().getUsage();
                 long memoryLimit = stats.getMemoryStats().getLimit();
-                
-                double cpuDelta = stats.getCpuStats().getCpuUsage().getTotalUsage() - 
-                                 stats.getPreCpuStats().getCpuUsage().getTotalUsage();
-                double systemDelta = stats.getCpuStats().getSystemCpuUsage() - 
-                                    stats.getPreCpuStats().getSystemCpuUsage();
+
+                double cpuDelta = stats.getCpuStats().getCpuUsage().getTotalUsage() -
+                        stats.getPreCpuStats().getCpuUsage().getTotalUsage();
+                double systemDelta = stats.getCpuStats().getSystemCpuUsage() -
+                        stats.getPreCpuStats().getSystemCpuUsage();
                 double cpuUsage = 0.0;
                 if (systemDelta > 0.0 && cpuDelta > 0.0) {
                     cpuUsage = (cpuDelta / systemDelta) * stats.getCpuStats().getOnlineCpus() * 100.0;
@@ -688,7 +689,7 @@ public final class DockerServiceProvider extends ServiceProvider {
                 long networkSendBytes = 0;
                 double networkReceiveBandwidth = 0.0;
                 double networkSendBandwidth = 0.0;
-                
+
                 if (stats.getNetworks() != null) {
                     for (Map.Entry<String, StatisticNetworksConfig> entry : stats.getNetworks().entrySet()) {
                         StatisticNetworksConfig networkStats = entry.getValue();
@@ -699,7 +700,7 @@ public final class DockerServiceProvider extends ServiceProvider {
                     String previousStatsKey = "docker_network_" + serverId;
                     NetworkStatsCache previousStats = this.networkStatsCache.get(previousStatsKey);
                     long currentTime = System.currentTimeMillis();
-                    
+
                     if (previousStats != null) {
                         long timeDelta = currentTime - previousStats.timestamp;
                         if (timeDelta > 0) {
@@ -713,17 +714,17 @@ public final class DockerServiceProvider extends ServiceProvider {
                 }
 
                 ServerResourceMetrics metrics = ServerResourceMetrics.builder()
-                    .cpuUsage(cpuUsage)
-                    .memoryUsed(memoryUsed)
-                    .memoryTotal(memoryLimit)
-                    .diskUsed(diskUsed)
-                    .diskTotal(diskTotal)
-                    .networkReceiveBytes(networkReceiveBytes)
-                    .networkSendBytes(networkSendBytes)
-                    .networkReceiveBandwidth(networkReceiveBandwidth)
-                    .networkSendBandwidth(networkSendBandwidth)
-                    .lastUpdated(System.currentTimeMillis())
-                    .build();
+                        .cpuUsage(cpuUsage)
+                        .memoryUsed(memoryUsed)
+                        .memoryTotal(memoryLimit)
+                        .diskUsed(diskUsed)
+                        .diskTotal(diskTotal)
+                        .networkReceiveBytes(networkReceiveBytes)
+                        .networkSendBytes(networkSendBytes)
+                        .networkReceiveBandwidth(networkReceiveBandwidth)
+                        .networkSendBandwidth(networkSendBandwidth)
+                        .lastUpdated(System.currentTimeMillis())
+                        .build();
 
                 return Optional.of(metrics);
             } catch (Exception e) {
@@ -737,18 +738,18 @@ public final class DockerServiceProvider extends ServiceProvider {
         if (!directory.exists() || !directory.isDirectory()) {
             return 0;
         }
-        
+
         try {
             return Files.walk(directory.toPath())
-                .filter(Files::isRegularFile)
-                .mapToLong(path -> {
-                    try {
-                        return Files.size(path);
-                    } catch (IOException e) {
-                        return 0;
-                    }
-                })
-                .sum();
+                    .filter(Files::isRegularFile)
+                    .mapToLong(path -> {
+                        try {
+                            return Files.size(path);
+                        } catch (IOException e) {
+                            return 0;
+                        }
+                    })
+                    .sum();
         } catch (IOException e) {
             Logger.debug("Failed to calculate directory size for " + directory.getPath() + ": " + e.getMessage());
             return 0;
@@ -906,13 +907,33 @@ public final class DockerServiceProvider extends ServiceProvider {
                     .withBinds(this.createBinds(dockerGroupConfig, atlasServer))
                     .withNetworkMode(this.dockerConfig.getNetwork());
 
+            List<PortBinding> portBindings = new ArrayList<>();
             if (this.isProxyServer(atlasServer.getGroup())) {
                 int hostPort = this.getNextAvailableProxyPort(atlasServer.getName());
-                createCmd = createCmd.withPortBindings(PortBinding.parse(hostPort + ":25565"));
+                portBindings.add(PortBinding.parse(hostPort + ":25565"));
 
                 this.serverIdToPort.put(atlasServer.getServerId(), hostPort);
 
                 Logger.debug("Exposing proxy {} on host port {}", atlasServer.getName(), hostPort);
+            }
+
+            for (String port : groupConfig.getServiceProvider().getDocker().getPorts()) {
+                if (!port.contains(":")) continue;
+
+                String[] parts = port.split(":");
+                if (parts.length != 2) continue;
+
+                portBindings.add(PortBinding.parse(port));
+            }
+
+            createCmd = createCmd.withPortBindings(portBindings);
+
+            if (!portBindings.isEmpty()) {
+                List<ExposedPort> exposedPorts = new ArrayList<>();
+                for (PortBinding binding : portBindings) {
+                    exposedPorts.add(binding.getExposedPort());
+                }
+                createCmd = createCmd.withExposedPorts(exposedPorts);
             }
 
             if (dockerGroupConfig.getMemory() != null && !dockerGroupConfig.getMemory().isEmpty()) {
@@ -940,10 +961,10 @@ public final class DockerServiceProvider extends ServiceProvider {
                     try {
                         String containerName = "atlas-" + atlasServer.getName();
                         List<Container> existing = this.dockerClient.listContainersCmd()
-                            .withShowAll(true)
-                            .withNameFilter(List.of(containerName))
-                            .exec();
-                        
+                                .withShowAll(true)
+                                .withNameFilter(List.of(containerName))
+                                .exec();
+
                         for (Container existingContainer : existing) {
                             this.dockerClient.removeContainerCmd(existingContainer.getId()).withForce(true).exec();
                             Logger.debug("Removed existing container: {}", existingContainer.getId().substring(0, 12));
@@ -1335,7 +1356,7 @@ public final class DockerServiceProvider extends ServiceProvider {
 
         return 0.0;
     }
-    
+
     public DockerClient getDockerClient() {
         return this.dockerClient;
     }
@@ -1390,7 +1411,7 @@ public final class DockerServiceProvider extends ServiceProvider {
             Logger.info("Found {} Atlas-managed containers to remove", containerCount);
 
             List<String> dynamicVolumesToCleanup = new ArrayList<>();
-            
+
             for (Container container : containers) {
                 String containerId = container.getId();
                 String containerName = container.getNames()[0];
@@ -1428,7 +1449,7 @@ public final class DockerServiceProvider extends ServiceProvider {
                     Logger.error("Failed to stop/remove container {}: {}", containerName, e.getMessage());
                 }
             }
-            
+
             this.cleanupDynamicVolumesOnShutdown(dynamicVolumesToCleanup);
 
             this.serverContainerIds.clear();
@@ -1440,7 +1461,7 @@ public final class DockerServiceProvider extends ServiceProvider {
             Logger.error("Error during container cleanup: {}", e.getMessage());
         }
     }
-    
+
     private void cleanupDynamicVolumesOnShutdown(List<String> volumePaths) {
         try {
             AtlasBase atlasInstance = AtlasBase.getInstance();
@@ -1451,10 +1472,10 @@ public final class DockerServiceProvider extends ServiceProvider {
                     return;
                 }
             }
-            
+
             DirectoryManager directoryManager = new DirectoryManager();
             int cleanedCount = 0;
-            
+
             for (String volumePath : volumePaths) {
                 try {
                     Path volumeDir = Paths.get(volumePath);
@@ -1466,7 +1487,7 @@ public final class DockerServiceProvider extends ServiceProvider {
                     Logger.warn("Failed to cleanup volume directory during shutdown {}: {}", volumePath, e.getMessage());
                 }
             }
-            
+
             Path serversDir = Paths.get("servers");
             if (Files.exists(serversDir) && Files.isDirectory(serversDir)) {
                 try {
@@ -1488,7 +1509,7 @@ public final class DockerServiceProvider extends ServiceProvider {
                     Logger.error("Error scanning servers directory for cleanup: {}", e.getMessage());
                 }
             }
-            
+
             if (cleanedCount > 0) {
                 Logger.info("Cleaned up {} dynamic server directories during shutdown", cleanedCount);
             }
@@ -1727,13 +1748,13 @@ public final class DockerServiceProvider extends ServiceProvider {
                         if (scaler != null && scaler.getManuallyStopped().contains(serverId)) {
                             isManuallyStopped = true;
                         }
-                        
+
                         if (isManuallyStopped) {
                             Logger.debug("Skipping zombie detection for manually stopped STATIC server: {}", server.getName());
                             continue;
                         }
                     }
-                    
+
                     Logger.warn("Detected zombie server: {} (container {} not found in Docker)", serverId, containerId.substring(0, 12));
                     Logger.debug("Cleaning up zombie server tracking for: {}", serverId);
 
@@ -1891,9 +1912,9 @@ public final class DockerServiceProvider extends ServiceProvider {
 
             if (downloadOnStartup && groupConfig.getTemplates() != null && !groupConfig.getTemplates().isEmpty()) {
                 TemplateManager templateManager = new TemplateManager(
-            atlasBase.getConfigManager().getAtlasConfig().getAtlas().getTemplates(),
-            atlasBase.getConfigManager().getAtlasConfig().getAtlas().getS3()
-        );
+                        atlasBase.getConfigManager().getAtlasConfig().getAtlas().getTemplates(),
+                        atlasBase.getConfigManager().getAtlasConfig().getAtlas().getS3()
+                );
                 boolean isStaticServer = server.getType() == ServerType.STATIC;
                 templateManager.applyTemplatesWithPluginCleanup(server.getWorkingDirectory(), groupConfig.getTemplates(), isStaticServer);
                 templateManager.close();
@@ -1927,7 +1948,7 @@ public final class DockerServiceProvider extends ServiceProvider {
                     Logger.debug("Restored log streaming for server: {}", server.getName());
                 }
             }
-            
+
             return startedServer;
         } catch (Exception e) {
             throw new Exception("Failed to create and start container for server: " + server.getName(), e);
@@ -1994,7 +2015,7 @@ public final class DockerServiceProvider extends ServiceProvider {
             Logger.error("Error during failed start cleanup for server: {}", server.getName(), e);
         }
     }
-    
+
     /**
      * Waits for a container to actually stop and then updates the server status.
      */
@@ -2002,12 +2023,12 @@ public final class DockerServiceProvider extends ServiceProvider {
         this.executorService.submit(() -> {
             int attempts = 0;
             int maxAttempts = 60;
-            
+
             while (attempts < maxAttempts) {
                 try {
                     InspectContainerResponse containerInfo = this.dockerClient.inspectContainerCmd(containerId).exec();
                     Boolean running = containerInfo.getState().getRunning();
-                    
+
                     if (running == null || !running) {
                         Logger.debug("Container for server {} has stopped after {} ms", server.getName(), attempts * 500);
 
@@ -2022,11 +2043,11 @@ public final class DockerServiceProvider extends ServiceProvider {
 
                         if (server.getServerInfo() != null) {
                             ServerInfo stoppedInfo = ServerInfo.builder()
-                                .status(ServerStatus.STOPPED)
-                                .onlinePlayers(0)
-                                .maxPlayers(server.getServerInfo().getMaxPlayers())
-                                .onlinePlayerNames(new HashSet<>())
-                                .build();
+                                    .status(ServerStatus.STOPPED)
+                                    .onlinePlayers(0)
+                                    .maxPlayers(server.getServerInfo().getMaxPlayers())
+                                    .onlinePlayerNames(new HashSet<>())
+                                    .build();
                             server.updateServerInfo(stoppedInfo);
                         }
 
@@ -2045,10 +2066,10 @@ public final class DockerServiceProvider extends ServiceProvider {
                                 return null;
                             });
                         }
-                        
+
                         return;
                     }
-                    
+
                     Thread.sleep(500);
                     attempts++;
                 } catch (Exception e) {
@@ -2056,16 +2077,16 @@ public final class DockerServiceProvider extends ServiceProvider {
                     return;
                 }
             }
-            
+
             Logger.warn("Container for server {} did not stop within 30 seconds", server.getName());
         });
     }
-    
+
     private static class NetworkStatsCache {
         final long rxBytes;
         final long txBytes;
         final long timestamp;
-        
+
         NetworkStatsCache(long rxBytes, long txBytes, long timestamp) {
             this.rxBytes = rxBytes;
             this.txBytes = txBytes;
@@ -2077,7 +2098,7 @@ public final class DockerServiceProvider extends ServiceProvider {
     public String getContainerIdForServer(String serverId) {
         return this.serverContainerIds.get(serverId);
     }
-    
+
     @Override
     public void waitForContainerStopAndRestart(AtlasServer server, String containerId) {
         this.waitForContainerStop(server, containerId);

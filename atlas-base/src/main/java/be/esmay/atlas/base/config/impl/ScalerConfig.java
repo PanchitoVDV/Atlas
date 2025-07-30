@@ -163,6 +163,8 @@ public final class ScalerConfig extends ConfigurateConfig {
 
         private List<String> volumes;
 
+        private List<String> ports;
+
     }
 
     @Data
