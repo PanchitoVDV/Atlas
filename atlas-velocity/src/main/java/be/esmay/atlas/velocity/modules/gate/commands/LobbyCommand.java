@@ -23,8 +23,8 @@ public final class LobbyCommand implements RawCommand {
             return;
         }
 
-        AtlasServer currentAtlasServer = AtlasVelocityAPI.getServerByName(System.getenv("SERVER_NAME")).orElse(null);
-        if (currentAtlasServer == null || currentAtlasServer.getGroup().equalsIgnoreCase(this.gateModule.getPlugin().getDefaultConfiguration().getLobbyGroup())) {
+        AtlasServer currentAtlasServer = AtlasVelocityAPI.getServerByName(player.getCurrentServer().map(server -> server.getServerInfo().getName()).orElse("Unknown")).orElse(null);
+        if (currentAtlasServer == null || currentAtlasServer.getGroup().trim().equalsIgnoreCase(this.gateModule.getPlugin().getDefaultConfiguration().getLobbyGroup())) {
             player.sendMessage(ChatUtils.format(this.gateModule.getPlugin().getMessagesConfiguration().getAlreadyInLobby()));
             return;
         }
