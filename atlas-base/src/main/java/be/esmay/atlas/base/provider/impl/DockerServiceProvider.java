@@ -626,6 +626,12 @@ public final class DockerServiceProvider extends ServiceProvider {
                 InspectContainerResponse containerInfo = this.dockerClient.inspectContainerCmd(containerId).exec();
                 return Boolean.TRUE.equals(containerInfo.getState().getRunning());
             } catch (Exception e) {
+                String errorMessage = e.getMessage();
+                if (errorMessage != null && (errorMessage.contains("404") || errorMessage.contains("No such container"))) {
+                    Logger.debug("Container not found for server {} - cleaning up stale mapping", serverId);
+                    this.serverContainerIds.remove(serverId);
+                    return false;
+                }
                 Logger.error("Error checking Docker container status: {}", e.getMessage());
                 return false;
             }
@@ -728,6 +734,12 @@ public final class DockerServiceProvider extends ServiceProvider {
 
                 return Optional.of(metrics);
             } catch (Exception e) {
+                String errorMessage = e.getMessage();
+                if (errorMessage != null && (errorMessage.contains("404") || errorMessage.contains("No such container"))) {
+                    Logger.debug("Container not found when getting metrics for server {} - cleaning up", serverId);
+                    this.serverContainerIds.remove(serverId);
+                    return Optional.empty();
+                }
                 Logger.debug("Failed to get resource metrics for server " + serverId + ": " + e.getMessage());
                 return Optional.empty();
             }
@@ -1763,6 +1775,30 @@ public final class DockerServiceProvider extends ServiceProvider {
                     this.serverIdToPort.remove(serverId);
 
                     zombieServerIds.add(serverId);
+                    
+                    if (server.getType() == ServerType.STATIC && !server.isShutdown()) {
+                        Scaler zombieScaler = AtlasBase.getInstance().getScalerManager().getScaler(server.getGroup());
+                        if (zombieScaler != null && !zombieScaler.getManuallyStopped().contains(serverId)) {
+                            Logger.info("Attempting to recover zombie static server: {}", server.getName());
+                            
+                            if (server.getServerInfo() != null) {
+                                ServerInfo stoppedInfo = ServerInfo.builder()
+                                        .status(ServerStatus.STOPPED)
+                                        .onlinePlayers(0)
+                                        .maxPlayers(server.getServerInfo().getMaxPlayers())
+                                        .onlinePlayerNames(new HashSet<>())
+                                        .build();
+                                server.updateServerInfo(stoppedInfo);
+                            }
+                            
+                            AtlasBase atlasBase = AtlasBase.getInstance();
+                            ServerLifecycleService lifecycleService = new ServerLifecycleService(atlasBase);
+                            lifecycleService.restartServer(server).exceptionally(throwable -> {
+                                Logger.error("Failed to recover zombie static server {}: {}", server.getName(), throwable.getMessage());
+                                return null;
+                            });
+                        }
+                    }
                 }
             }
 
@@ -2073,6 +2109,44 @@ public final class DockerServiceProvider extends ServiceProvider {
                     Thread.sleep(500);
                     attempts++;
                 } catch (Exception e) {
+                    String errorMessage = e.getMessage();
+                    if (errorMessage != null && (errorMessage.contains("404") || errorMessage.contains("No such container"))) {
+                        Logger.warn("Container {} for server {} no longer exists - cleaning up", containerId.substring(0, 12), server.getName());
+                        
+                        this.serverContainerIds.remove(server.getServerId());
+                        
+                        if (server.getType() == ServerType.STATIC && !server.isShutdown()) {
+                            AtlasBase atlasInstance = AtlasBase.getInstance();
+                            if (atlasInstance != null && atlasInstance.getScalerManager() != null) {
+                                Scaler scaler = atlasInstance.getScalerManager().getScaler(server.getGroup());
+                                if (scaler != null && !scaler.getManuallyStopped().contains(server.getServerId())) {
+                                    Logger.info("Static server {} container disappeared unexpectedly - initiating recovery", server.getName());
+                                    
+                                    if (server.getServerInfo() != null) {
+                                        ServerInfo stoppedInfo = ServerInfo.builder()
+                                                .status(ServerStatus.STOPPED)
+                                                .onlinePlayers(0)
+                                                .maxPlayers(server.getServerInfo().getMaxPlayers())
+                                                .onlinePlayerNames(new HashSet<>())
+                                                .build();
+                                        server.updateServerInfo(stoppedInfo);
+                                    }
+                                    
+                                    if (AtlasBase.getInstance().getNettyServer() != null) {
+                                        AtlasBase.getInstance().getNettyServer().broadcastServerUpdate(server);
+                                    }
+                                    
+                                    ServerLifecycleService lifecycleService = new ServerLifecycleService(AtlasBase.getInstance());
+                                    lifecycleService.restartServer(server).exceptionally(throwable -> {
+                                        Logger.error("Failed to recover static server {} after container disappeared: {}", server.getName(), throwable.getMessage());
+                                        return null;
+                                    });
+                                }
+                            }
+                        }
+                        return;
+                    }
+                    
                     Logger.error("Error checking container status for {}: {}", server.getName(), e.getMessage());
                     return;
                 }
