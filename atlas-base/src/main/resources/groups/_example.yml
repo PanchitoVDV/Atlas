@@ -17,6 +17,12 @@ group:
       scale-up-threshold: 0.8 # 80% capacity
       scale-down-threshold: 0.3 # 30% capacity
 
+      # Scale up when no servers match this condition (e.g., no waiting games)
+      #scale-up-metadata-condition: "game_status=WAITING OR game_status=PREPARING"
+      
+      # Protect servers matching this condition from being scaled down
+      #scale-down-protected-condition: "game_status=IN_PROGRESS OR game_status=STARTING OR players>0"
+
   templates:
     - "global/server"
     - "lobby/default"

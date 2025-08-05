@@ -6,6 +6,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.Setter;
 
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiConsumer;
 
 @Data
@@ -30,6 +32,9 @@ public final class AtlasServer {
 
     private ServerInfo serverInfo;
     private ServerResourceMetrics resourceMetrics;
+
+    @Builder.Default
+    private Map<String, String> metadata = new ConcurrentHashMap<>();
 
     @Setter
     private transient BiConsumer<String, ServerStatus> statusChangeListener;
@@ -57,5 +62,43 @@ public final class AtlasServer {
     public AtlasServer withResourceMetrics(ServerResourceMetrics resourceMetrics) {
         this.resourceMetrics = resourceMetrics;
         return this;
+    }
+
+    public void setMetadata(String key, String value) {
+        if (key == null) return;
+        if (this.metadata == null) {
+            this.metadata = new ConcurrentHashMap<>();
+        }
+
+        this.metadata.put(key, value);
+    }
+
+    public void setMetadata(Map<String, String> metadata) {
+        if (metadata == null) return;
+        if (this.metadata == null) {
+            this.metadata = new ConcurrentHashMap<>();
+        }
+
+        this.metadata.putAll(metadata);
+    }
+
+    public String getMetadata(String key) {
+        if (key == null || this.metadata == null) return null;
+        return this.metadata.get(key);
+    }
+
+    public boolean hasMetadata(String key) {
+        if (key == null || this.metadata == null) return false;
+        return this.metadata.containsKey(key);
+    }
+
+    public void removeMetadata(String key) {
+        if (key == null || this.metadata == null) return;
+        this.metadata.remove(key);
+    }
+
+    public void clearMetadata() {
+        if (this.metadata == null) return;
+        this.metadata.clear();
     }
 }

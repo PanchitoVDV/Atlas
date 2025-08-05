@@ -3,6 +3,7 @@ package be.esmay.atlas.velocity.modules.scaling.api;
 import be.esmay.atlas.common.enums.ServerStatus;
 import be.esmay.atlas.common.models.AtlasServer;
 import be.esmay.atlas.common.models.ServerInfo;
+import be.esmay.atlas.common.network.packet.packets.MetadataUpdatePacket;
 import be.esmay.atlas.common.network.packet.packets.ServerControlPacket;
 import be.esmay.atlas.velocity.modules.scaling.cache.NetworkServerCacheManager;
 import be.esmay.atlas.velocity.modules.scaling.network.AtlasNetworkClient;
@@ -10,7 +11,9 @@ import be.esmay.atlas.velocity.modules.scaling.proxy.ProxyServerInfoManager;
 import lombok.experimental.UtilityClass;
 
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @UtilityClass
@@ -159,5 +162,58 @@ public final class AtlasVelocityAPI {
 
         AtlasVelocityAPI.networkClient.sendServerControl(serverIdentifier, ServerControlPacket.ControlAction.RESTART);
     }
-    
+
+    public static void setMetadata(String key, String value) {
+        if (!AtlasVelocityAPI.initialized || AtlasVelocityAPI.networkClient == null) {
+            return;
+        }
+
+        Map<String, String> metadata = new HashMap<>();
+        metadata.put(key, value);
+        AtlasVelocityAPI.sendMetadataUpdatePacket(metadata);
+    }
+
+    public static void setMetadata(Map<String, String> metadata) {
+        if (!AtlasVelocityAPI.initialized || AtlasVelocityAPI.networkClient == null || metadata == null) {
+            return;
+        }
+
+        AtlasVelocityAPI.sendMetadataUpdatePacket(metadata);
+    }
+
+    public static String getMetadata(String key) {
+        if (!AtlasVelocityAPI.initialized || key == null) {
+            return null;
+        }
+
+        String serverId = AtlasVelocityAPI.networkClient.getServerId();
+        Optional<AtlasServer> server = AtlasVelocityAPI.getServer(serverId);
+        return server.map(s -> s.getMetadata(key)).orElse(null);
+    }
+
+    public static Map<String, String> getAllMetadata() {
+        if (!AtlasVelocityAPI.initialized) {
+            return new HashMap<>();
+        }
+
+        String serverId = AtlasVelocityAPI.networkClient.getServerId();
+        Optional<AtlasServer> server = AtlasVelocityAPI.getServer(serverId);
+        return server.map(AtlasServer::getMetadata).orElse(new HashMap<>());
+    }
+
+    public static void removeMetadata(String key) {
+        if (!AtlasVelocityAPI.initialized || AtlasVelocityAPI.networkClient == null || key == null) {
+            return;
+        }
+
+        Map<String, String> metadata = new HashMap<>();
+        metadata.put(key, null);
+        AtlasVelocityAPI.sendMetadataUpdatePacket(metadata);
+    }
+
+    private static void sendMetadataUpdatePacket(Map<String, String> metadata) {
+        String serverId = AtlasVelocityAPI.networkClient.getServerId();
+        MetadataUpdatePacket packet = new MetadataUpdatePacket(serverId, metadata);
+        AtlasVelocityAPI.networkClient.sendPacket(packet);
+    }
 }

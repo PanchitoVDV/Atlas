@@ -3,6 +3,7 @@ package be.esmay.atlas.minestom.api;
 import be.esmay.atlas.common.enums.ServerStatus;
 import be.esmay.atlas.common.models.AtlasServer;
 import be.esmay.atlas.common.models.ServerInfo;
+import be.esmay.atlas.common.network.packet.packets.MetadataUpdatePacket;
 import be.esmay.atlas.common.network.packet.packets.ServerControlPacket;
 import be.esmay.atlas.minestom.AtlasMinestomPlugin;
 import be.esmay.atlas.minestom.cache.NetworkServerCacheManager;
@@ -11,7 +12,9 @@ import be.esmay.atlas.minestom.server.MinestomServerInfoManager;
 import lombok.experimental.UtilityClass;
 
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @UtilityClass
@@ -22,6 +25,7 @@ public final class AtlasMinestomAPI {
     private static AtlasNetworkClient networkClient;
     private static AtlasMinestomPlugin plugin;
     private static boolean initialized = false;
+    
 
     public static void initialize(NetworkServerCacheManager cacheManager, MinestomServerInfoManager serverInfoManager, AtlasNetworkClient networkClient, AtlasMinestomPlugin plugin) {
         AtlasMinestomAPI.cacheManager = cacheManager;
@@ -30,6 +34,7 @@ public final class AtlasMinestomAPI {
         AtlasMinestomAPI.plugin = plugin;
         AtlasMinestomAPI.initialized = true;
     }
+    
 
     public static void shutdown() {
         AtlasMinestomAPI.cacheManager = null;
@@ -207,5 +212,59 @@ public final class AtlasMinestomAPI {
         }
 
         AtlasMinestomAPI.networkClient.sendServerControl(serverIdentifier, ServerControlPacket.ControlAction.RESTART);
+    }
+
+    public static void setMetadata(String key, String value) {
+        if (!AtlasMinestomAPI.initialized || AtlasMinestomAPI.networkClient == null) {
+            return;
+        }
+
+        Map<String, String> metadata = new HashMap<>();
+        metadata.put(key, value);
+        AtlasMinestomAPI.sendMetadataUpdatePacket(metadata);
+    }
+
+    public static void setMetadata(Map<String, String> metadata) {
+        if (!AtlasMinestomAPI.initialized || AtlasMinestomAPI.networkClient == null || metadata == null) {
+            return;
+        }
+
+        AtlasMinestomAPI.sendMetadataUpdatePacket(metadata);
+    }
+
+    public static String getMetadata(String key) {
+        if (!AtlasMinestomAPI.initialized || key == null) {
+            return null;
+        }
+
+        String serverId = AtlasMinestomAPI.networkClient.getServerId();
+        Optional<AtlasServer> server = AtlasMinestomAPI.getServer(serverId);
+        return server.map(s -> s.getMetadata(key)).orElse(null);
+    }
+
+    public static Map<String, String> getAllMetadata() {
+        if (!AtlasMinestomAPI.initialized) {
+            return new HashMap<>();
+        }
+
+        String serverId = AtlasMinestomAPI.networkClient.getServerId();
+        Optional<AtlasServer> server = AtlasMinestomAPI.getServer(serverId);
+        return server.map(AtlasServer::getMetadata).orElse(new HashMap<>());
+    }
+
+    public static void removeMetadata(String key) {
+        if (!AtlasMinestomAPI.initialized || AtlasMinestomAPI.networkClient == null || key == null) {
+            return;
+        }
+
+        Map<String, String> metadata = new HashMap<>();
+        metadata.put(key, null);
+        AtlasMinestomAPI.sendMetadataUpdatePacket(metadata);
+    }
+
+    private static void sendMetadataUpdatePacket(Map<String, String> metadata) {
+        String serverId = AtlasMinestomAPI.networkClient.getServerId();
+        MetadataUpdatePacket packet = new MetadataUpdatePacket(serverId, metadata);
+        AtlasMinestomAPI.networkClient.sendPacket(packet);
     }
 }

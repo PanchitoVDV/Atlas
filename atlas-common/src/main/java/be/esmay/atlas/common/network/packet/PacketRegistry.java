@@ -4,6 +4,7 @@ import be.esmay.atlas.common.network.packet.packets.AtlasServerUpdatePacket;
 import be.esmay.atlas.common.network.packet.packets.AuthenticationPacket;
 import be.esmay.atlas.common.network.packet.packets.HandshakePacket;
 import be.esmay.atlas.common.network.packet.packets.HeartbeatPacket;
+import be.esmay.atlas.common.network.packet.packets.MetadataUpdatePacket;
 import be.esmay.atlas.common.network.packet.packets.ServerAddPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerCommandPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerControlPacket;
@@ -33,6 +34,7 @@ public final class PacketRegistry {
         registerPacket(0x14, ServerListRequestPacket.class, ServerListRequestPacket::new);
         registerPacket(0x20, ServerInfoUpdatePacket.class, ServerInfoUpdatePacket::new);
         registerPacket(0x21, AtlasServerUpdatePacket.class, AtlasServerUpdatePacket::new);
+        registerPacket(0x22, MetadataUpdatePacket.class, MetadataUpdatePacket::new);
         registerPacket(0x30, ServerCommandPacket.class, ServerCommandPacket::new);
         registerPacket(0x31, ServerControlPacket.class, ServerControlPacket::new);
     }

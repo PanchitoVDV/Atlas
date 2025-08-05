@@ -6,6 +6,7 @@ import be.esmay.atlas.common.network.packet.packets.AtlasServerUpdatePacket;
 import be.esmay.atlas.common.network.packet.packets.AuthenticationPacket;
 import be.esmay.atlas.common.network.packet.packets.HandshakePacket;
 import be.esmay.atlas.common.network.packet.packets.HeartbeatPacket;
+import be.esmay.atlas.common.network.packet.packets.MetadataUpdatePacket;
 import be.esmay.atlas.common.network.packet.packets.ServerAddPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerCommandPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerControlPacket;
@@ -130,5 +131,15 @@ public final class MinestomPacketHandler extends SimpleChannelInboundHandler<Pac
     @Override
     public void handleServerControl(ServerControlPacket packet) {
         this.logger.info("Server control packet received (should not happen on client side): {} for server: {}", packet.getAction(), packet.getServerIdentifier());
+    }
+
+    @Override
+    public void handleMetadataUpdate(MetadataUpdatePacket packet) {
+        this.logger.info("Metadata update received for server: {}", packet.getServerId());
+        
+        this.cacheManager.getServer(packet.getServerId()).ifPresent(server -> {
+            server.setMetadata(packet.getMetadata());
+            this.cacheManager.updateAtlasServer(server);
+        });
     }
 }

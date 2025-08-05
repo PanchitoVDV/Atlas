@@ -16,6 +16,7 @@ import be.esmay.atlas.common.network.packet.packets.AtlasServerUpdatePacket;
 import be.esmay.atlas.common.network.packet.packets.AuthenticationPacket;
 import be.esmay.atlas.common.network.packet.packets.HandshakePacket;
 import be.esmay.atlas.common.network.packet.packets.HeartbeatPacket;
+import be.esmay.atlas.common.network.packet.packets.MetadataUpdatePacket;
 import be.esmay.atlas.common.network.packet.packets.ServerAddPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerCommandPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerControlPacket;
@@ -307,6 +308,41 @@ public final class AtlasChannelHandler extends SimpleChannelInboundHandler<Packe
             Logger.error("Failed to handle server control for {}: {}", serverIdentifier, throwable.getMessage());
             return null;
         });
+    }
+
+    @Override
+    public void handleMetadataUpdate(MetadataUpdatePacket packet) {
+        Logger.debug("Metadata update received for server: {}", packet.getServerId());
+        
+        if (this.currentContext == null) {
+            Logger.warn("Metadata update received but no current context available");
+            return;
+        }
+
+        Connection connection = this.connectionManager.getConnection(this.currentContext.channel());
+        if (connection == null || !connection.isAuthenticated()) {
+            Logger.warn("Metadata update from unauthenticated connection");
+            return;
+        }
+        
+        AtlasBase atlasInstance = AtlasBase.getInstance();
+        if (atlasInstance == null || atlasInstance.getScalerManager() == null) {
+            Logger.error("Atlas instance or ScalerManager is not available");
+            return;
+        }
+        
+        for (Scaler scaler : atlasInstance.getScalerManager().getScalers()) {
+            AtlasServer server = scaler.getServers().stream()
+                    .filter(s -> s.getServerId().equals(packet.getServerId()))
+                    .findFirst()
+                    .orElse(null);
+                    
+            if (server != null) {
+                server.setMetadata(packet.getMetadata());
+                Logger.debug("Updated metadata for server: {}", server.getName());
+                break;
+            }
+        }
     }
 
 }

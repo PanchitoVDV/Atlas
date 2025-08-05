@@ -17,6 +17,7 @@ import be.esmay.atlas.base.utils.Logger;
 import be.esmay.atlas.common.enums.ServerStatus;
 import be.esmay.atlas.common.models.AtlasServer;
 import be.esmay.atlas.common.models.ServerResourceMetrics;
+import be.esmay.atlas.common.network.packet.packets.MetadataUpdatePacket;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -96,6 +97,11 @@ public final class ApiRoutes {
         this.router.get("/api/v1/templates/files/download").handler(this::downloadTemplateFile);
         this.router.post("/api/v1/templates/files/mkdir").handler(this::createTemplateDirectory);
         this.router.post("/api/v1/templates/files/rename").handler(this::renameTemplateFile);
+
+        this.router.get("/api/v1/servers/:id/metadata").handler(this::getServerMetadata);
+        this.router.put("/api/v1/servers/:id/metadata").handler(this::setServerMetadata);
+        this.router.put("/api/v1/servers/:id/metadata/:key").handler(this::setServerMetadataKey);
+        this.router.delete("/api/v1/servers/:id/metadata/:key").handler(this::removeServerMetadataKey);
 
         this.router.post("/api/v1/servers").handler(this::createServers);
         this.router.post("/api/v1/servers/:id/start").handler(this::startServer);
@@ -1876,6 +1882,171 @@ public final class ApiRoutes {
         } catch (Exception e) {
             Logger.error("Failed to upload template file at path {}", targetPath, e);
             this.sendError(context, "Failed to upload template file: " + e.getMessage());
+        }
+    }
+
+    private void getServerMetadata(RoutingContext context) {
+        String serverId = context.pathParam("id");
+        ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
+
+        provider.getServer(serverId)
+                .thenAccept(serverOpt -> {
+                    if (serverOpt.isEmpty()) {
+                        this.sendError(context, "Server not found: " + serverId, 404);
+                        return;
+                    }
+
+                    AtlasServer server = serverOpt.get();
+                    this.sendResponse(context, ApiResponse.success(server.getMetadata()));
+                })
+                .exceptionally(throwable -> {
+                    this.sendError(context, "Failed to get server metadata: " + throwable.getMessage());
+                    return null;
+                });
+    }
+
+    private void setServerMetadata(RoutingContext context) {
+        String serverId = context.pathParam("id");
+        JsonObject body = context.body().asJsonObject();
+
+        if (body == null) {
+            this.sendError(context, "Request body is required", 400);
+            return;
+        }
+
+        ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
+
+        provider.getServer(serverId)
+                .thenAccept(serverOpt -> {
+                    if (serverOpt.isEmpty()) {
+                        this.sendError(context, "Server not found: " + serverId, 404);
+                        return;
+                    }
+
+                    AtlasServer server = serverOpt.get();
+                    Map<String, String> newMetadata = new HashMap<>();
+
+                    for (String key : body.fieldNames()) {
+                        if (key == null || key.trim().isEmpty() || key.length() > 100) {
+                            continue;
+                        }
+                        Object value = body.getValue(key);
+                        if (value != null) {
+                            String valueStr = value.toString();
+                            if (valueStr.length() > 1000) {
+                                continue;
+                            }
+                            newMetadata.put(key, valueStr);
+                        }
+                    }
+
+                    server.setMetadata(newMetadata);
+                    
+                    this.broadcastMetadataUpdate(server.getServerId(), server.getMetadata());
+
+                    this.sendResponse(context, ApiResponse.success(server.getMetadata(), "Metadata updated successfully"));
+                })
+                .exceptionally(throwable -> {
+                    this.sendError(context, "Failed to set server metadata: " + throwable.getMessage());
+                    return null;
+                });
+    }
+
+    private void setServerMetadataKey(RoutingContext context) {
+        String serverId = context.pathParam("id");
+        String key = context.pathParam("key");
+        String value = context.body().asString();
+
+        if (key == null || key.trim().isEmpty()) {
+            this.sendError(context, "Metadata key is required", 400);
+            return;
+        }
+
+        if (key.length() > 100) {
+            this.sendError(context, "Metadata key too long (max 100 characters)", 400);
+            return;
+        }
+
+        if (value == null) {
+            value = "";
+        }
+
+        if (value.length() > 1000) {
+            this.sendError(context, "Metadata value too long (max 1000 characters)", 400);
+            return;
+        }
+
+        ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
+        String finalValue = value;
+
+        provider.getServer(serverId)
+                .thenAccept(serverOpt -> {
+                    if (serverOpt.isEmpty()) {
+                        this.sendError(context, "Server not found: " + serverId, 404);
+                        return;
+                    }
+
+                    AtlasServer server = serverOpt.get();
+                    server.setMetadata(key, finalValue);
+                    
+                    this.broadcastMetadataUpdate(server.getServerId(), server.getMetadata());
+
+                    Map<String, String> response = new HashMap<>();
+                    response.put("key", key);
+                    response.put("value", finalValue);
+
+                    this.sendResponse(context, ApiResponse.success(response, "Metadata key updated successfully"));
+                })
+                .exceptionally(throwable -> {
+                    this.sendError(context, "Failed to set server metadata key: " + throwable.getMessage());
+                    return null;
+                });
+    }
+
+    private void removeServerMetadataKey(RoutingContext context) {
+        String serverId = context.pathParam("id");
+        String key = context.pathParam("key");
+
+        if (key == null || key.trim().isEmpty()) {
+            this.sendError(context, "Metadata key is required", 400);
+            return;
+        }
+
+        ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
+
+        provider.getServer(serverId)
+                .thenAccept(serverOpt -> {
+                    if (serverOpt.isEmpty()) {
+                        this.sendError(context, "Server not found: " + serverId, 404);
+                        return;
+                    }
+
+                    AtlasServer server = serverOpt.get();
+                    server.removeMetadata(key);
+                    
+                    this.broadcastMetadataUpdate(server.getServerId(), server.getMetadata());
+
+                    this.sendResponse(context, ApiResponse.success(null, "Metadata key removed successfully"));
+                })
+                .exceptionally(throwable -> {
+                    this.sendError(context, "Failed to remove server metadata key: " + throwable.getMessage());
+                    return null;
+                });
+    }
+    
+    private void broadcastMetadataUpdate(String serverId, Map<String, String> metadata) {
+        try {
+            AtlasBase atlasInstance = AtlasBase.getInstance();
+            if (atlasInstance != null && atlasInstance.getNettyServer() != null && 
+                atlasInstance.getNettyServer().getConnectionManager() != null) {
+                
+                MetadataUpdatePacket packet = new MetadataUpdatePacket(serverId, metadata);
+                atlasInstance.getNettyServer().getConnectionManager().broadcastPacket(packet);
+                
+                Logger.debug("Broadcasted metadata update for server {} to all connected plugins", serverId);
+            }
+        } catch (Exception e) {
+            Logger.error("Failed to broadcast metadata update for server {}: {}", serverId, e.getMessage());
         }
     }
 }

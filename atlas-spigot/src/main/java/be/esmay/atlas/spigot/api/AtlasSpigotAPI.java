@@ -3,6 +3,7 @@ package be.esmay.atlas.spigot.api;
 import be.esmay.atlas.common.enums.ServerStatus;
 import be.esmay.atlas.common.models.AtlasServer;
 import be.esmay.atlas.common.models.ServerInfo;
+import be.esmay.atlas.common.network.packet.packets.MetadataUpdatePacket;
 import be.esmay.atlas.common.network.packet.packets.ServerControlPacket;
 import be.esmay.atlas.spigot.cache.NetworkServerCacheManager;
 import be.esmay.atlas.spigot.network.AtlasNetworkClient;
@@ -10,7 +11,9 @@ import be.esmay.atlas.spigot.server.SpigotServerInfoManager;
 import lombok.experimental.UtilityClass;
 
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @UtilityClass
@@ -186,5 +189,59 @@ public final class AtlasSpigotAPI {
         }
 
         AtlasSpigotAPI.networkClient.sendServerControl(serverIdentifier, ServerControlPacket.ControlAction.RESTART);
+    }
+
+    public static void setMetadata(String key, String value) {
+        if (!AtlasSpigotAPI.initialized || AtlasSpigotAPI.networkClient == null) {
+            return;
+        }
+
+        Map<String, String> metadata = new HashMap<>();
+        metadata.put(key, value);
+        AtlasSpigotAPI.sendMetadataUpdatePacket(metadata);
+    }
+
+    public static void setMetadata(Map<String, String> metadata) {
+        if (!AtlasSpigotAPI.initialized || AtlasSpigotAPI.networkClient == null || metadata == null) {
+            return;
+        }
+
+        AtlasSpigotAPI.sendMetadataUpdatePacket(metadata);
+    }
+
+    public static String getMetadata(String key) {
+        if (!AtlasSpigotAPI.initialized || key == null) {
+            return null;
+        }
+
+        String serverId = AtlasSpigotAPI.networkClient.getServerId();
+        Optional<AtlasServer> server = AtlasSpigotAPI.getServer(serverId);
+        return server.map(s -> s.getMetadata(key)).orElse(null);
+    }
+
+    public static Map<String, String> getAllMetadata() {
+        if (!AtlasSpigotAPI.initialized) {
+            return new HashMap<>();
+        }
+
+        String serverId = AtlasSpigotAPI.networkClient.getServerId();
+        Optional<AtlasServer> server = AtlasSpigotAPI.getServer(serverId);
+        return server.map(AtlasServer::getMetadata).orElse(new HashMap<>());
+    }
+
+    public static void removeMetadata(String key) {
+        if (!AtlasSpigotAPI.initialized || AtlasSpigotAPI.networkClient == null || key == null) {
+            return;
+        }
+
+        Map<String, String> metadata = new HashMap<>();
+        metadata.put(key, null);
+        AtlasSpigotAPI.sendMetadataUpdatePacket(metadata);
+    }
+
+    private static void sendMetadataUpdatePacket(Map<String, String> metadata) {
+        String serverId = AtlasSpigotAPI.networkClient.getServerId();
+        MetadataUpdatePacket packet = new MetadataUpdatePacket(serverId, metadata);
+        AtlasSpigotAPI.networkClient.sendPacket(packet);
     }
 }

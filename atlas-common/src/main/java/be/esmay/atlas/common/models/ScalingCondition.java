@@ -9,5 +9,8 @@ public class ScalingCondition {
     private int threshold;
     private int cooldownSeconds;
     private boolean enabled;
+    
+    private String scaleUpMetadataCondition;
+    private String scaleDownProtectedCondition;
 
 }

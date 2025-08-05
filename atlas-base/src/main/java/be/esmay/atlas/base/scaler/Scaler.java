@@ -314,6 +314,7 @@ public abstract class Scaler {
 
         AtlasServer serverToRemove = this.getAutoScaledServers().stream()
                 .filter(server -> server.getServerInfo() != null && server.getServerInfo().getStatus() == ServerStatus.RUNNING)
+                .filter(server -> !this.isServerProtectedFromScaleDown(server))
                 .min(Comparator.comparingInt((AtlasServer server) -> server.getServerInfo() != null ? server.getServerInfo().getOnlinePlayers() : 0)
                         .thenComparing(AtlasServer::getCreatedAt, Comparator.reverseOrder()))
                 .orElse(null);
@@ -705,13 +706,15 @@ public abstract class Scaler {
             }
         }
 
+        boolean metadataConditionMet = this.evaluateScaleUpMetadataCondition();
+
         if (thresholdMet && canScale && !cooldownExpired) {
             Logger.debug("Scale up conditions met for {} but in cooldown for {} more seconds",
                     this.groupName,
                     cooldownSeconds - Instant.now().getEpochSecond() + this.lastScaleUpTime.getEpochSecond());
         }
 
-        return thresholdMet && canScale && cooldownExpired;
+        return thresholdMet && canScale && cooldownExpired && metadataConditionMet;
     }
 
     protected boolean shouldScaleDown() {
@@ -1015,6 +1018,45 @@ public abstract class Scaler {
                 .playerDetails(lastKnownCount, newCount, server.getServerInfo() != null ? server.getServerInfo().getMaxPlayers() : 20)
                 .metadata("capacity_reached", true)
                 .record();
+        }
+    }
+
+    protected boolean evaluateScaleUpMetadataCondition() {
+        try {
+            String condition = this.scalerConfig.getGroup().getScaling().getConditions().getScaleUpMetadataCondition();
+            if (condition == null || condition.trim().isEmpty()) {
+                return true;
+            }
+
+            long matchingServers = this.servers.values().stream()
+                    .filter(server -> {
+                        try {
+                            return MetadataConditionParser.evaluate(condition, server.getMetadata());
+                        } catch (Exception e) {
+                            Logger.error("Error evaluating metadata condition for server {}: {}", server.getServerId(), e.getMessage());
+                            return false;
+                        }
+                    })
+                    .count();
+
+            return matchingServers == 0;
+        } catch (Exception e) {
+            Logger.error("Error evaluating scale-up metadata condition for group {}: {}", this.groupName, e.getMessage());
+            return true;
+        }
+    }
+
+    protected boolean isServerProtectedFromScaleDown(AtlasServer server) {
+        try {
+            String condition = this.scalerConfig.getGroup().getScaling().getConditions().getScaleDownProtectedCondition();
+            if (condition == null || condition.trim().isEmpty()) {
+                return false;
+            }
+
+            return MetadataConditionParser.evaluate(condition, server.getMetadata());
+        } catch (Exception e) {
+            Logger.error("Error evaluating scale-down protection condition for server {}: {}", server.getServerId(), e.getMessage());
+            return true;
         }
     }
 

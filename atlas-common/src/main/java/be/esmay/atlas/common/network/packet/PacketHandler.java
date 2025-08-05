@@ -4,6 +4,7 @@ import be.esmay.atlas.common.network.packet.packets.AtlasServerUpdatePacket;
 import be.esmay.atlas.common.network.packet.packets.AuthenticationPacket;
 import be.esmay.atlas.common.network.packet.packets.HandshakePacket;
 import be.esmay.atlas.common.network.packet.packets.HeartbeatPacket;
+import be.esmay.atlas.common.network.packet.packets.MetadataUpdatePacket;
 import be.esmay.atlas.common.network.packet.packets.ServerAddPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerCommandPacket;
 import be.esmay.atlas.common.network.packet.packets.ServerControlPacket;
@@ -38,5 +39,7 @@ public interface PacketHandler {
     void handleServerCommand(ServerCommandPacket packet);
     
     void handleServerControl(ServerControlPacket packet);
+    
+    void handleMetadataUpdate(MetadataUpdatePacket packet);
     
 }

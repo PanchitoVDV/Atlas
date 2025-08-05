@@ -125,6 +125,12 @@ public final class ScalerConfig extends ConfigurateConfig {
         @Setting("scale-down-threshold")
         private double scaleDownThreshold;
 
+        @Setting("scale-up-metadata-condition")
+        private String scaleUpMetadataCondition;
+
+        @Setting("scale-down-protected-condition")
+        private String scaleDownProtectedCondition;
+
     }
 
     @Data
