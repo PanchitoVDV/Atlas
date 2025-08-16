@@ -81,6 +81,8 @@ public final class ApiRoutes {
         this.router.post("/api/v1/servers/:id/files/upload/:uploadId/complete").handler(this::completeChunkedUpload);
         this.router.post("/api/v1/servers/:id/files/mkdir").handler(this::createDirectory);
         this.router.post("/api/v1/servers/:id/files/rename").handler(this::renameFile);
+        this.router.post("/api/v1/servers/:id/files/zip").handler(this::zipFiles);
+        this.router.post("/api/v1/servers/:id/files/unzip").handler(this::unzipFile);
         this.router.get("/api/v1/groups").handler(this::getGroups);
         this.router.get("/api/v1/groups/:name").handler(this::getGroup);
         this.router.get("/api/v1/scaling").handler(this::getScaling);
@@ -97,6 +99,8 @@ public final class ApiRoutes {
         this.router.get("/api/v1/templates/files/download").handler(this::downloadTemplateFile);
         this.router.post("/api/v1/templates/files/mkdir").handler(this::createTemplateDirectory);
         this.router.post("/api/v1/templates/files/rename").handler(this::renameTemplateFile);
+        this.router.post("/api/v1/templates/files/zip").handler(this::zipTemplateFiles);
+        this.router.post("/api/v1/templates/files/unzip").handler(this::unzipTemplateFile);
 
         this.router.get("/api/v1/servers/:id/metadata").handler(this::getServerMetadata);
         this.router.put("/api/v1/servers/:id/metadata").handler(this::setServerMetadata);
@@ -2047,6 +2051,258 @@ public final class ApiRoutes {
             }
         } catch (Exception e) {
             Logger.error("Failed to broadcast metadata update for server {}: {}", serverId, e.getMessage());
+        }
+    }
+
+    private void zipFiles(RoutingContext context) {
+        String serverId = context.pathParam("id");
+        JsonObject body = context.body().asJsonObject();
+
+        if (body == null) {
+            this.sendError(context, "Request body is required", 400);
+            return;
+        }
+
+        List<String> sourcePaths = body.getJsonArray("sources", new io.vertx.core.json.JsonArray()).stream()
+                .map(Object::toString)
+                .collect(Collectors.toList());
+        String zipPath = body.getString("zipPath");
+        String workingPath = body.getString("workingPath");
+
+        if (sourcePaths.isEmpty()) {
+            this.sendError(context, "At least one source path is required", 400);
+            return;
+        }
+
+        if (zipPath == null || zipPath.isEmpty()) {
+            this.sendError(context, "zipPath is required", 400);
+            return;
+        }
+
+        if (!this.fileManager.isValidPath(zipPath)) {
+            this.sendError(context, "Invalid zip file path: directory traversal not allowed", 400);
+            return;
+        }
+
+        if (workingPath != null && !this.fileManager.isValidPath(workingPath)) {
+            this.sendError(context, "Invalid working path: directory traversal not allowed", 400);
+            return;
+        }
+
+        for (String path : sourcePaths) {
+            if (!this.fileManager.isValidPath(path)) {
+                this.sendError(context, "Invalid source path: directory traversal not allowed", 400);
+                return;
+            }
+        }
+
+        ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
+
+        provider.getServer(serverId)
+                .thenAccept(serverOpt -> {
+                    if (serverOpt.isEmpty()) {
+                        this.sendError(context, "Server not found: " + serverId, 404);
+                        return;
+                    }
+
+                    AtlasServer server = serverOpt.get();
+                    String workingDirectory = server.getWorkingDirectory();
+
+                    if (workingDirectory == null || workingDirectory.isEmpty()) {
+                        this.sendError(context, "Server working directory not set: " + serverId, 500);
+                        return;
+                    }
+
+                    try {
+                        this.fileManager.zipFiles(workingDirectory, sourcePaths, zipPath, workingPath);
+
+                        Map<String, Object> response = new HashMap<>();
+                        response.put("zipPath", zipPath);
+                        response.put("sources", sourcePaths);
+
+                        this.sendResponse(context, ApiResponse.success(response, "Files zipped successfully"));
+
+                    } catch (SecurityException e) {
+                        Logger.warn("Security violation: attempted zip operation outside server directory for server {}: {}", serverId, e.getMessage());
+                        this.sendError(context, "Security violation: " + e.getMessage(), 403);
+                    } catch (Exception e) {
+                        Logger.error("Failed to zip files for server {}", serverId, e);
+                        this.sendError(context, "Failed to zip files: " + e.getMessage());
+                    }
+                })
+                .exceptionally(throwable -> {
+                    this.sendError(context, "Failed to find server: " + throwable.getMessage());
+                    return null;
+                });
+    }
+
+    private void unzipFile(RoutingContext context) {
+        String serverId = context.pathParam("id");
+        JsonObject body = context.body().asJsonObject();
+
+        if (body == null) {
+            this.sendError(context, "Request body is required", 400);
+            return;
+        }
+
+        String zipPath = body.getString("zipPath");
+        String destinationPath = body.getString("destination");
+        String workingPath = body.getString("workingPath");
+
+        if (zipPath == null || zipPath.isEmpty()) {
+            this.sendError(context, "zipPath is required", 400);
+            return;
+        }
+
+        if (destinationPath == null || destinationPath.isEmpty()) {
+            this.sendError(context, "destination is required", 400);
+            return;
+        }
+
+        if (!this.fileManager.isValidPath(zipPath) || !this.fileManager.isValidPath(destinationPath)) {
+            this.sendError(context, "Invalid file path: directory traversal not allowed", 400);
+            return;
+        }
+
+        if (workingPath != null && !this.fileManager.isValidPath(workingPath)) {
+            this.sendError(context, "Invalid working path: directory traversal not allowed", 400);
+            return;
+        }
+
+        ServiceProvider provider = AtlasBase.getInstance().getProviderManager().getProvider();
+
+        provider.getServer(serverId)
+                .thenAccept(serverOpt -> {
+                    if (serverOpt.isEmpty()) {
+                        this.sendError(context, "Server not found: " + serverId, 404);
+                        return;
+                    }
+
+                    AtlasServer server = serverOpt.get();
+                    String workingDirectory = server.getWorkingDirectory();
+
+                    if (workingDirectory == null || workingDirectory.isEmpty()) {
+                        this.sendError(context, "Server working directory not set: " + serverId, 500);
+                        return;
+                    }
+
+                    try {
+                        this.fileManager.unzipFile(workingDirectory, zipPath, destinationPath, workingPath);
+
+                        Map<String, Object> response = new HashMap<>();
+                        response.put("zipPath", zipPath);
+                        response.put("destination", destinationPath);
+
+                        this.sendResponse(context, ApiResponse.success(response, "File unzipped successfully"));
+
+                    } catch (SecurityException e) {
+                        Logger.warn("Security violation: attempted unzip operation outside server directory for server {}: {}", serverId, e.getMessage());
+                        this.sendError(context, "Security violation: " + e.getMessage(), 403);
+                    } catch (Exception e) {
+                        Logger.error("Failed to unzip file for server {}", serverId, e);
+                        this.sendError(context, "Failed to unzip file: " + e.getMessage());
+                    }
+                })
+                .exceptionally(throwable -> {
+                    this.sendError(context, "Failed to find server: " + throwable.getMessage());
+                    return null;
+                });
+    }
+
+    private void zipTemplateFiles(RoutingContext context) {
+        JsonObject body = context.body().asJsonObject();
+
+        if (body == null) {
+            this.sendError(context, "Request body is required", 400);
+            return;
+        }
+
+        List<String> sourcePaths = body.getJsonArray("sources", new io.vertx.core.json.JsonArray()).stream()
+                .map(Object::toString)
+                .collect(Collectors.toList());
+        String zipPath = body.getString("zipPath");
+
+        if (sourcePaths.isEmpty()) {
+            this.sendError(context, "At least one source path is required", 400);
+            return;
+        }
+
+        if (zipPath == null || zipPath.isEmpty()) {
+            this.sendError(context, "zipPath is required", 400);
+            return;
+        }
+
+        if (!this.fileManager.isValidPath(zipPath)) {
+            this.sendError(context, "Invalid zip file path: directory traversal not allowed", 400);
+            return;
+        }
+
+        for (String path : sourcePaths) {
+            if (!this.fileManager.isValidPath(path)) {
+                this.sendError(context, "Invalid source path: directory traversal not allowed", 400);
+                return;
+            }
+        }
+
+        try {
+            this.fileManager.zipTemplateFiles(sourcePaths, zipPath);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("zipPath", zipPath);
+            response.put("sources", sourcePaths);
+
+            this.sendResponse(context, ApiResponse.success(response, "Template files zipped successfully"));
+
+        } catch (SecurityException e) {
+            Logger.warn("Security violation: attempted zip operation outside templates directory: {}", e.getMessage());
+            this.sendError(context, "Security violation: " + e.getMessage(), 403);
+        } catch (Exception e) {
+            Logger.error("Failed to zip template files", e);
+            this.sendError(context, "Failed to zip template files: " + e.getMessage());
+        }
+    }
+
+    private void unzipTemplateFile(RoutingContext context) {
+        JsonObject body = context.body().asJsonObject();
+
+        if (body == null) {
+            this.sendError(context, "Request body is required", 400);
+            return;
+        }
+
+        String zipPath = body.getString("zipPath");
+        String destinationPath = body.getString("destination");
+
+        if (zipPath == null || zipPath.isEmpty()) {
+            this.sendError(context, "zipPath is required", 400);
+            return;
+        }
+
+        if (destinationPath == null || destinationPath.isEmpty()) {
+            this.sendError(context, "destination is required", 400);
+            return;
+        }
+
+        if (!this.fileManager.isValidPath(zipPath) || !this.fileManager.isValidPath(destinationPath)) {
+            this.sendError(context, "Invalid file path: directory traversal not allowed", 400);
+            return;
+        }
+
+        try {
+            this.fileManager.unzipTemplateFile(zipPath, destinationPath);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("zipPath", zipPath);
+            response.put("destination", destinationPath);
+
+            this.sendResponse(context, ApiResponse.success(response, "Template file unzipped successfully"));
+
+        } catch (SecurityException e) {
+            Logger.warn("Security violation: attempted unzip operation outside templates directory: {}", e.getMessage());
+            this.sendError(context, "Security violation: " + e.getMessage(), 403);
+        } catch (Exception e) {
+            Logger.error("Failed to unzip template file", e);
+            this.sendError(context, "Failed to unzip template file: " + e.getMessage());
         }
     }
 }

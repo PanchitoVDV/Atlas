@@ -24,6 +24,9 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+import java.util.zip.ZipOutputStream;
 
 public final class FileManager {
     
@@ -329,6 +332,199 @@ public final class FileManager {
         }
 
         this.validatePathWithinServer(newTargetPath, serverBasePath);
+    }
+
+    public void zipFiles(String workingDirectory, List<String> sourcePaths, String zipFilePath, String workingPath) throws Exception {
+        this.validateWorkingDirectory(workingDirectory);
+        
+        Path serverBasePath = Paths.get(workingDirectory).toAbsolutePath().normalize();
+        Path currentWorkingPath = this.resolvePath(serverBasePath, workingPath != null ? workingPath : "/");
+        this.validatePathWithinServer(currentWorkingPath, serverBasePath);
+        
+        Path zipPath = this.resolvePath(currentWorkingPath, zipFilePath);
+        this.validatePathWithinServer(zipPath, serverBasePath);
+        
+        if (Files.exists(zipPath) && Files.isDirectory(zipPath)) {
+            throw new IllegalArgumentException("Cannot create zip file: target is a directory: " + zipFilePath);
+        }
+        
+        Path parentDir = zipPath.getParent();
+        if (parentDir != null && !Files.exists(parentDir)) {
+            Files.createDirectories(parentDir);
+        }
+        
+        List<Path> resolvedPaths = new ArrayList<>();
+        for (String sourcePath : sourcePaths) {
+            Path resolved = this.resolvePath(currentWorkingPath, sourcePath);
+            this.validatePathWithinServer(resolved, serverBasePath);
+            
+            if (!Files.exists(resolved)) {
+                throw new IllegalArgumentException("Source path does not exist: " + sourcePath);
+            }
+            resolvedPaths.add(resolved);
+        }
+        
+        final long[] totalBytesCompressed = {0};
+        long maxCompressedSize = 8L * 1024 * 1024 * 1024; // 8GB limit
+        final int[] filesCompressed = {0};
+        
+        try (ZipOutputStream zos = new ZipOutputStream(Files.newOutputStream(zipPath))) {
+            for (Path sourcePath : resolvedPaths) {
+                if (Files.isDirectory(sourcePath)) {
+                    Files.walk(sourcePath)
+                        .filter(path -> !Files.isDirectory(path))
+                        .forEach(path -> {
+                            try {
+                                Path relativePath = currentWorkingPath.relativize(path);
+                                ZipEntry entry = new ZipEntry(relativePath.toString().replace("\\", "/"));
+                                zos.putNextEntry(entry);
+                                
+                                byte[] bytes = Files.readAllBytes(path);
+                                totalBytesCompressed[0] += bytes.length;
+                                filesCompressed[0]++;
+                                
+                                if (totalBytesCompressed[0] > maxCompressedSize) {
+                                    throw new RuntimeException("Compressed size exceeds maximum limit of 8GB");
+                                }
+                                
+                                zos.write(bytes);
+                                zos.closeEntry();
+                            } catch (IOException e) {
+                                throw new RuntimeException("Failed to add file to zip: " + path, e);
+                            }
+                        });
+                } else {
+                    Path relativePath = currentWorkingPath.relativize(sourcePath);
+                    ZipEntry entry = new ZipEntry(relativePath.toString().replace("\\", "/"));
+                    zos.putNextEntry(entry);
+                    
+                    byte[] bytes = Files.readAllBytes(sourcePath);
+                    totalBytesCompressed[0] += bytes.length;
+                    
+                    if (totalBytesCompressed[0] > maxCompressedSize) {
+                        throw new RuntimeException("Compressed size exceeds maximum limit of 8GB");
+                    }
+                    
+                    zos.write(bytes);
+                    zos.closeEntry();
+                    filesCompressed[0]++;
+                }
+            }
+        } catch (Exception e) {
+            Files.deleteIfExists(zipPath);
+            throw new RuntimeException("Failed to create zip file: " + e.getMessage(), e);
+        }
+        
+        Logger.info("Successfully created zip file {} with {} files ({} bytes)", zipFilePath, filesCompressed[0], totalBytesCompressed[0]);
+    }
+
+    public void zipFiles(String workingDirectory, List<String> sourcePaths, String zipFilePath) throws Exception {
+        this.zipFiles(workingDirectory, sourcePaths, zipFilePath, null);
+    }
+
+    public void unzipFile(String workingDirectory, String zipFilePath, String destinationPath, String workingPath) throws Exception {
+        this.validateWorkingDirectory(workingDirectory);
+        
+        Path serverBasePath = Paths.get(workingDirectory).toAbsolutePath().normalize();
+        Path currentWorkingPath = this.resolvePath(serverBasePath, workingPath != null ? workingPath : "/");
+        this.validatePathWithinServer(currentWorkingPath, serverBasePath);
+        
+        Path zipPath = this.resolvePath(currentWorkingPath, zipFilePath);
+        Path destPath = this.resolvePath(currentWorkingPath, destinationPath);
+        
+        this.validatePathWithinServer(zipPath, serverBasePath);
+        this.validatePathWithinServer(destPath, serverBasePath);
+        
+        if (!Files.exists(zipPath)) {
+            throw new IllegalArgumentException("Zip file does not exist: " + zipFilePath);
+        }
+        
+        if (!Files.isRegularFile(zipPath)) {
+            throw new IllegalArgumentException("Path is not a file: " + zipFilePath);
+        }
+        
+        if (!Files.exists(destPath)) {
+            Files.createDirectories(destPath);
+        }
+        
+        if (!Files.isDirectory(destPath)) {
+            throw new IllegalArgumentException("Destination is not a directory: " + destinationPath);
+        }
+        
+        long totalBytesExtracted = 0;
+        long maxExtractedSize = 8L * 1024 * 1024 * 1024; // 8GB limit
+        int filesExtracted = 0;
+        int maxFiles = 10000; // Maximum number of files to extract
+        
+        try (ZipInputStream zis = new ZipInputStream(Files.newInputStream(zipPath))) {
+            ZipEntry entry;
+            
+            while ((entry = zis.getNextEntry()) != null) {
+                if (filesExtracted >= maxFiles) {
+                    throw new RuntimeException("Zip file contains too many entries (max " + maxFiles + ")");
+                }
+                
+                String entryName = entry.getName();
+                
+                if (entryName.contains("..") || entryName.startsWith("/")) {
+                    Logger.warn("Skipping potentially malicious zip entry: {}", entryName);
+                    continue;
+                }
+                
+                Path entryPath = destPath.resolve(entryName).normalize();
+                
+                if (!entryPath.startsWith(destPath)) {
+                    Logger.warn("Skipping zip entry with path traversal: {}", entryName);
+                    continue;
+                }
+                
+                this.validatePathWithinServer(entryPath, serverBasePath);
+                
+                if (entry.isDirectory()) {
+                    Files.createDirectories(entryPath);
+                } else {
+                    Path parentDir = entryPath.getParent();
+                    if (parentDir != null && !Files.exists(parentDir)) {
+                        Files.createDirectories(parentDir);
+                    }
+                    
+                    try (var outputStream = Files.newOutputStream(entryPath)) {
+                        byte[] buffer = new byte[8192];
+                        int bytesRead;
+                        long entryBytesWritten = 0;
+                        long maxEntrySize = 1024L * 1024 * 1024; // 1GB per file limit
+                        
+                        while ((bytesRead = zis.read(buffer)) != -1) {
+                            entryBytesWritten += bytesRead;
+                            totalBytesExtracted += bytesRead;
+                            
+                            if (entryBytesWritten > maxEntrySize) {
+                                Files.deleteIfExists(entryPath);
+                                throw new RuntimeException("Zip entry '" + entryName + "' exceeds maximum size of 1GB");
+                            }
+                            
+                            if (totalBytesExtracted > maxExtractedSize) {
+                                Files.deleteIfExists(entryPath);
+                                throw new RuntimeException("Total extracted size exceeds maximum limit of 8GB");
+                            }
+                            
+                            outputStream.write(buffer, 0, bytesRead);
+                        }
+                    }
+                }
+                
+                filesExtracted++;
+                zis.closeEntry();
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to unzip file: " + e.getMessage(), e);
+        }
+        
+        Logger.info("Successfully extracted {} files ({} bytes) from {}", filesExtracted, totalBytesExtracted, zipFilePath);
+    }
+
+    public void unzipFile(String workingDirectory, String zipFilePath, String destinationPath) throws Exception {
+        this.unzipFile(workingDirectory, zipFilePath, destinationPath, null);
     }
 
     public boolean isValidPath(String path) {
@@ -842,6 +1038,192 @@ public final class FileManager {
         } catch (Exception e) {
             throw new RuntimeException("Failed to rename/move template file: " + e.getMessage(), e);
         }
+    }
+
+    public void zipTemplateFiles(List<String> sourcePaths, String zipFilePath) throws Exception {
+        Path templatesBasePath = Paths.get(TEMPLATES_DIR).toAbsolutePath().normalize();
+        
+        if (!Files.exists(templatesBasePath)) {
+            Files.createDirectories(templatesBasePath);
+        }
+        
+        Path zipPath = this.resolveTemplatePath(templatesBasePath, zipFilePath);
+        
+        this.validatePathWithinTemplates(zipPath, templatesBasePath);
+        
+        if (Files.exists(zipPath) && Files.isDirectory(zipPath)) {
+            throw new IllegalArgumentException("Cannot create template zip file: target is a directory: " + zipFilePath);
+        }
+        
+        Path parentDir = zipPath.getParent();
+        if (parentDir != null && !Files.exists(parentDir)) {
+            Files.createDirectories(parentDir);
+        }
+        
+        List<Path> resolvedPaths = new ArrayList<>();
+        for (String sourcePath : sourcePaths) {
+            Path resolved = this.resolveTemplatePath(templatesBasePath, sourcePath);
+            this.validatePathWithinTemplates(resolved, templatesBasePath);
+            
+            if (!Files.exists(resolved)) {
+                throw new IllegalArgumentException("Template source path does not exist: " + sourcePath);
+            }
+            resolvedPaths.add(resolved);
+        }
+        
+        final long[] totalBytesCompressed = {0};
+        long maxCompressedSize = 8L * 1024 * 1024 * 1024; // 8GB limit
+        final int[] filesCompressed = {0};
+        
+        try (ZipOutputStream zos = new ZipOutputStream(Files.newOutputStream(zipPath))) {
+            for (Path sourcePath : resolvedPaths) {
+                if (Files.isDirectory(sourcePath)) {
+                    Files.walk(sourcePath)
+                        .filter(path -> !Files.isDirectory(path))
+                        .forEach(path -> {
+                            try {
+                                Path relativePath = templatesBasePath.relativize(path);
+                                ZipEntry entry = new ZipEntry(relativePath.toString().replace("\\", "/"));
+                                zos.putNextEntry(entry);
+                                
+                                byte[] bytes = Files.readAllBytes(path);
+                                totalBytesCompressed[0] += bytes.length;
+                                filesCompressed[0]++;
+                                
+                                if (totalBytesCompressed[0] > maxCompressedSize) {
+                                    throw new RuntimeException("Template compressed size exceeds maximum limit of 8GB");
+                                }
+                                
+                                zos.write(bytes);
+                                zos.closeEntry();
+                            } catch (IOException e) {
+                                throw new RuntimeException("Failed to add template file to zip: " + path, e);
+                            }
+                        });
+                } else {
+                    Path relativePath = templatesBasePath.relativize(sourcePath);
+                    ZipEntry entry = new ZipEntry(relativePath.toString().replace("\\", "/"));
+                    zos.putNextEntry(entry);
+                    
+                    byte[] bytes = Files.readAllBytes(sourcePath);
+                    totalBytesCompressed[0] += bytes.length;
+                    
+                    if (totalBytesCompressed[0] > maxCompressedSize) {
+                        throw new RuntimeException("Template compressed size exceeds maximum limit of 8GB");
+                    }
+                    
+                    zos.write(bytes);
+                    zos.closeEntry();
+                    filesCompressed[0]++;
+                }
+            }
+        } catch (Exception e) {
+            Files.deleteIfExists(zipPath);
+            throw new RuntimeException("Failed to create template zip file: " + e.getMessage(), e);
+        }
+        
+        Logger.info("Successfully created template zip file {} with {} files ({} bytes)", zipFilePath, filesCompressed[0], totalBytesCompressed[0]);
+    }
+
+    public void unzipTemplateFile(String zipFilePath, String destinationPath) throws Exception {
+        Path templatesBasePath = Paths.get(TEMPLATES_DIR).toAbsolutePath().normalize();
+        
+        if (!Files.exists(templatesBasePath)) {
+            Files.createDirectories(templatesBasePath);
+        }
+        
+        Path zipPath = this.resolveTemplatePath(templatesBasePath, zipFilePath);
+        Path destPath = this.resolveTemplatePath(templatesBasePath, destinationPath);
+        
+        this.validatePathWithinTemplates(zipPath, templatesBasePath);
+        this.validatePathWithinTemplates(destPath, templatesBasePath);
+        
+        if (!Files.exists(zipPath)) {
+            throw new IllegalArgumentException("Template zip file does not exist: " + zipFilePath);
+        }
+        
+        if (!Files.isRegularFile(zipPath)) {
+            throw new IllegalArgumentException("Template path is not a file: " + zipFilePath);
+        }
+        
+        if (!Files.exists(destPath)) {
+            Files.createDirectories(destPath);
+        }
+        
+        if (!Files.isDirectory(destPath)) {
+            throw new IllegalArgumentException("Template destination is not a directory: " + destinationPath);
+        }
+        
+        long totalBytesExtracted = 0;
+        long maxExtractedSize = 8L * 1024 * 1024 * 1024; // 8GB limit
+        int filesExtracted = 0;
+        int maxFiles = 10000; // Maximum number of files to extract
+        
+        try (ZipInputStream zis = new ZipInputStream(Files.newInputStream(zipPath))) {
+            ZipEntry entry;
+            
+            while ((entry = zis.getNextEntry()) != null) {
+                if (filesExtracted >= maxFiles) {
+                    throw new RuntimeException("Template zip file contains too many entries (max " + maxFiles + ")");
+                }
+                
+                String entryName = entry.getName();
+                
+                if (entryName.contains("..") || entryName.startsWith("/")) {
+                    Logger.warn("Skipping potentially malicious template zip entry: {}", entryName);
+                    continue;
+                }
+                
+                Path entryPath = destPath.resolve(entryName).normalize();
+                
+                if (!entryPath.startsWith(destPath)) {
+                    Logger.warn("Skipping template zip entry with path traversal: {}", entryName);
+                    continue;
+                }
+                
+                this.validatePathWithinTemplates(entryPath, templatesBasePath);
+                
+                if (entry.isDirectory()) {
+                    Files.createDirectories(entryPath);
+                } else {
+                    Path parentDir = entryPath.getParent();
+                    if (parentDir != null && !Files.exists(parentDir)) {
+                        Files.createDirectories(parentDir);
+                    }
+                    
+                    try (var outputStream = Files.newOutputStream(entryPath)) {
+                        byte[] buffer = new byte[8192];
+                        int bytesRead;
+                        long entryBytesWritten = 0;
+                        long maxEntrySize = 1024L * 1024 * 1024; // 1GB per file limit
+                        
+                        while ((bytesRead = zis.read(buffer)) != -1) {
+                            entryBytesWritten += bytesRead;
+                            totalBytesExtracted += bytesRead;
+                            
+                            if (entryBytesWritten > maxEntrySize) {
+                                Files.deleteIfExists(entryPath);
+                                throw new RuntimeException("Template zip entry '" + entryName + "' exceeds maximum size of 1GB");
+                            }
+                            
+                            if (totalBytesExtracted > maxExtractedSize) {
+                                Files.deleteIfExists(entryPath);
+                                throw new RuntimeException("Total extracted size exceeds maximum limit of 8GB");
+                            }
+                            
+                            outputStream.write(buffer, 0, bytesRead);
+                        }
+                    }
+                }
+                
+                filesExtracted++;
+                zis.closeEntry();
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to unzip template file: " + e.getMessage(), e);
+        }
+        
+        Logger.info("Successfully extracted {} files ({} bytes) from template {}", filesExtracted, totalBytesExtracted, zipFilePath);
     }
     
     private Path resolveTemplatePath(Path templatesBasePath, String requestedPath) {

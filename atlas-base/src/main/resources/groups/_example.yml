@@ -41,6 +41,9 @@ group:
       #   - "/host/path:/container/path:ro"  # Read-only mount
       #   - "/host/configs:/configs:rw"      # Read-write mount
       #   - "/host/shared:/shared"           # Default is read-write
+      # Optional: Additional ports to expose
+      # ports:
+      #   - "8123:8123"  # Expose port 8123 for Dynmap
 
 # Cron jobs for automated server management
 # cron-jobs:

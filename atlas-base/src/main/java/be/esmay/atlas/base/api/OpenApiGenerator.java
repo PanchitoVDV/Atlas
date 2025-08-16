@@ -79,6 +79,8 @@ public final class OpenApiGenerator {
         paths.addPathItem("/api/v1/servers/{id}/files/upload", createFileUploadPath());
         paths.addPathItem("/api/v1/servers/{id}/files/mkdir", createMkdirPath());
         paths.addPathItem("/api/v1/servers/{id}/files/rename", createFileRenamePath());
+        paths.addPathItem("/api/v1/servers/{id}/files/zip", createZipPath());
+        paths.addPathItem("/api/v1/servers/{id}/files/unzip", createUnzipPath());
         paths.addPathItem("/api/v1/servers/{id}/start", createServerActionPath("start"));
         paths.addPathItem("/api/v1/servers/{id}/stop", createServerActionPath("stop"));
         paths.addPathItem("/api/v1/servers/{id}/command", createServerCommandPath());
@@ -588,6 +590,114 @@ public final class OpenApiGenerator {
                         .description("Server not found or source file does not exist"))
                     .addApiResponse("409", new ApiResponse()
                         .description("Destination already exists"))));
+    }
+
+    private static PathItem createZipPath() {
+        Parameter serverIdParam = new Parameter()
+            .name("id")
+            .in("path")
+            .description("Server ID")
+            .required(true)
+            .style(Parameter.StyleEnum.SIMPLE)
+            .explode(false)
+            .schema(new StringSchema());
+
+        return new PathItem()
+            .post(new Operation()
+                .operationId("zipFiles")
+                .summary("Create zip archive")
+                .description("Creates a zip archive from specified files and/or directories within the server's working directory. Maximum output size is 8GB.")
+                .addTagsItem("Files")
+                .addParametersItem(serverIdParam)
+                .requestBody(new RequestBody()
+                    .description("Zip creation parameters")
+                    .required(true)
+                    .content(new Content()
+                        .addMediaType("application/json", new MediaType()
+                            .schema(new ObjectSchema()
+                                .addProperty("sources", new ArraySchema()
+                                    .items(new StringSchema())
+                                    .description("List of file/directory paths to include in the zip")
+                                    .example(List.of("plugins", "config.yml", "logs")))
+                                .addProperty("zipPath", new StringSchema()
+                                    .description("Path where the zip file will be created")
+                                    .example("backups/server-backup.zip"))
+                                .required(List.of("sources", "zipPath"))))))
+                .responses(createStandardResponses()
+                    .addApiResponse("200", new ApiResponse()
+                        .description("Zip file created successfully")
+                        .content(new Content()
+                            .addMediaType("application/json", new MediaType()
+                                .schema(new ObjectSchema()
+                                    .addProperty("status", new StringSchema().example("success"))
+                                    .addProperty("data", new ObjectSchema()
+                                        .addProperty("zipPath", new StringSchema().example("backups/server-backup.zip"))
+                                        .addProperty("sources", new ArraySchema()
+                                            .items(new StringSchema())
+                                            .example(List.of("plugins", "config.yml", "logs"))))
+                                    .addProperty("message", new StringSchema().example("Files zipped successfully"))
+                                    .addProperty("timestamp", new Schema<>().type("integer").format("int64").example(1752700258719L))))))
+                    .addApiResponse("400", new ApiResponse()
+                        .description("Invalid parameters or path traversal attempt"))
+                    .addApiResponse("403", new ApiResponse()
+                        .description("Security violation - paths outside server directory"))
+                    .addApiResponse("404", new ApiResponse()
+                        .description("Server not found or source paths do not exist"))
+                    .addApiResponse("413", new ApiResponse()
+                        .description("Compressed size exceeds 8GB limit"))));
+    }
+
+    private static PathItem createUnzipPath() {
+        Parameter serverIdParam = new Parameter()
+            .name("id")
+            .in("path")
+            .description("Server ID")
+            .required(true)
+            .style(Parameter.StyleEnum.SIMPLE)
+            .explode(false)
+            .schema(new StringSchema());
+
+        return new PathItem()
+            .post(new Operation()
+                .operationId("unzipFile")
+                .summary("Extract zip archive")
+                .description("Extracts a zip archive to a specified directory within the server's working directory. " +
+                    "Maximum extracted size is 8GB, maximum 10,000 files. Protects against zip bombs and path traversal attacks.")
+                .addTagsItem("Files")
+                .addParametersItem(serverIdParam)
+                .requestBody(new RequestBody()
+                    .description("Unzip parameters")
+                    .required(true)
+                    .content(new Content()
+                        .addMediaType("application/json", new MediaType()
+                            .schema(new ObjectSchema()
+                                .addProperty("zipPath", new StringSchema()
+                                    .description("Path to the zip file to extract")
+                                    .example("backups/server-backup.zip"))
+                                .addProperty("destination", new StringSchema()
+                                    .description("Directory where files will be extracted")
+                                    .example("restored"))
+                                .required(List.of("zipPath", "destination"))))))
+                .responses(createStandardResponses()
+                    .addApiResponse("200", new ApiResponse()
+                        .description("Zip file extracted successfully")
+                        .content(new Content()
+                            .addMediaType("application/json", new MediaType()
+                                .schema(new ObjectSchema()
+                                    .addProperty("status", new StringSchema().example("success"))
+                                    .addProperty("data", new ObjectSchema()
+                                        .addProperty("zipPath", new StringSchema().example("backups/server-backup.zip"))
+                                        .addProperty("destination", new StringSchema().example("restored")))
+                                    .addProperty("message", new StringSchema().example("File unzipped successfully"))
+                                    .addProperty("timestamp", new Schema<>().type("integer").format("int64").example(1752700258719L))))))
+                    .addApiResponse("400", new ApiResponse()
+                        .description("Invalid parameters or path traversal attempt"))
+                    .addApiResponse("403", new ApiResponse()
+                        .description("Security violation - paths outside server directory or malicious zip content"))
+                    .addApiResponse("404", new ApiResponse()
+                        .description("Server not found or zip file does not exist"))
+                    .addApiResponse("413", new ApiResponse()
+                        .description("Extracted size exceeds limits or too many files"))));
     }
 
     private static PathItem createServerActionPath(String action) {
