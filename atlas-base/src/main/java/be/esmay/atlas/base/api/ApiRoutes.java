@@ -12,7 +12,6 @@ import be.esmay.atlas.base.config.impl.ScalerConfig;
 import be.esmay.atlas.base.files.FileManager;
 import be.esmay.atlas.base.metrics.NetworkBandwidthMonitor;
 import be.esmay.atlas.base.provider.ServiceProvider;
-import be.esmay.atlas.base.provider.StartOptions;
 import be.esmay.atlas.base.scaler.Scaler;
 import be.esmay.atlas.base.utils.Logger;
 import be.esmay.atlas.common.enums.ServerStatus;
@@ -116,7 +115,7 @@ public final class ApiRoutes {
         this.router.post("/api/v1/servers/:id/ws/token").handler(this::generateWebSocketToken);
         this.router.delete("/api/v1/servers/:id").handler(this::removeServer);
         this.router.post("/api/v1/groups/:group/scale").handler(this::scaleGroup);
-        this.router.post("/api/v1/groups/:group/restart").handler(this::restartGroup);
+        this.router.post("/api/v1/groups/:group/stop").handler(this::stopGroup);
     }
 
     private void getStatus(RoutingContext context) {
@@ -744,7 +743,7 @@ public final class ApiRoutes {
         }
     }
 
-    private void restartGroup(RoutingContext context) {
+    private void stopGroup(RoutingContext context) {
         String group = context.pathParam("group");
 
         Scaler scaler = AtlasBase.getInstance().getScalerManager().getScaler(group);
@@ -759,11 +758,8 @@ public final class ApiRoutes {
                 if (server.getServerInfo() != null && server.getServerInfo().getStatus() == ServerStatus.RUNNING) {
                     try {
                         AtlasBase.getInstance().getServerManager().stopServer(server).get();
-
-                        Thread.sleep(1000);
-                        AtlasBase.getInstance().getProviderManager().getProvider().startServerCompletely(server, StartOptions.restart()).get();
                     } catch (Exception e) {
-                        Logger.error("Failed to restart server {}: {}", server.getName(), e.getMessage());
+                        Logger.error("Failed to stop server {}: {}", server.getName(), e.getMessage());
                     }
                 }
             }
@@ -771,11 +767,11 @@ public final class ApiRoutes {
 
         /*
         Esmay tends to use Thread#sleep above, so I'll stick with that.
-        There would be huge delays on the API request if I waited until all servers are done restarting.
-        So I essentially send back an "initiated" response, telling the client that it'll TRY restarting the servers.
+        There would be huge delays on the API request if I waited until all servers are stopped.
+        So I essentially send back an "initiated" response, telling the client that it'll TRY stopping the servers.
         It's confusing, I know...
          */
-        this.sendResponse(context, ApiResponse.success(null, "Group restart initiated"));
+        this.sendResponse(context, ApiResponse.success(null, "Group stop initiated"));
     }
 
     private void executeServerAction(RoutingContext context, String serverId, String action,
