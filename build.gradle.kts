@@ -2,6 +2,7 @@ import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
 
 plugins {
     id("java")
+    id("maven-publish")
     id("com.github.johnrengelman.shadow") version "8.1.1" apply false
 }
 
@@ -12,12 +13,24 @@ allprojects {
     repositories {
         mavenCentral()
         mavenLocal()
+        maven {
+            name = "mineplay"
+            url = uri("https://repo.mineplay.nl/private")
+            credentials {
+                username = findProperty("mineplayUsername") as String? ?: ""
+                password = findProperty("mineplayPassword") as String? ?: ""
+            }
+            authentication {
+                create<BasicAuthentication>("basic")
+            }
+        }
     }
 }
 
 subprojects {
     apply(plugin = "java")
     apply(plugin = "com.github.johnrengelman.shadow")
+    apply(plugin = "maven-publish")
 
     dependencies {
         compileOnly("org.projectlombok:lombok:1.18.38")
@@ -35,5 +48,30 @@ subprojects {
     tasks.withType<ShadowJar> {
         archiveClassifier.set("")
         mergeServiceFiles()
+    }
+
+
+    publishing {
+        repositories {
+            maven {
+                name = "mineplay"
+                url = uri("https://repo.mineplay.nl/private")
+                credentials {
+                    username = findProperty("mineplayUsername") as String
+                    password = findProperty("mineplayPassword") as String
+                }
+                authentication {
+                    create<BasicAuthentication>("basic")
+                }
+            }
+            publications {
+                create<MavenPublication>("maven") {
+                    groupId = "be.esmay"
+                    artifactId = project.name
+                    version = version
+                    from(components["java"])
+                }
+            }
+        }
     }
 }
