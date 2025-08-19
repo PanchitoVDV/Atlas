@@ -88,6 +88,7 @@ public final class OpenApiGenerator {
         paths.addPathItem("/api/v1/groups", createGroupsPath());
         paths.addPathItem("/api/v1/groups/{name}", createGroupByNamePath());
         paths.addPathItem("/api/v1/groups/{group}/scale", createScalePath());
+        paths.addPathItem("/api/v1/groups/{group}/restart", createRestartGroupPath());
         paths.addPathItem("/api/v1/scaling", createScalingPath());
         paths.addPathItem("/api/v1/metrics", createMetricsPath());
         paths.addPathItem("/api/v1/utilization", createUtilizationPath());
@@ -806,6 +807,34 @@ public final class OpenApiGenerator {
                                 .schema(new Schema<>().$ref("#/components/schemas/GroupResponse")))))
                     .addApiResponse("404", new ApiResponse()
                         .description("Group not found"))));
+    }
+
+    private static PathItem createRestartGroupPath() {
+        Parameter groupNameParam = new Parameter()
+                .name("name")
+                .in("path")
+                .description("Group name (case-insensitive)")
+                .required(true)
+                .style(Parameter.StyleEnum.SIMPLE)
+                .explode(false)
+                .schema(new StringSchema());
+
+        return new PathItem()
+                .post(new Operation()
+                        .operationId("restartGroup")
+                        .summary("Restart all servers in a group")
+                        .description("Allows you to restart all servers in a specific scaling group by name (case-insensitive).")
+                        .addTagsItem("Scaling")
+                        .addSecurityItem(new SecurityRequirement().addList("bearerAuth"))
+                        .addParametersItem(groupNameParam)
+                        .responses(createStandardResponses()
+                                .addApiResponse("200", new ApiResponse()
+                                        .description("Restart initiated")
+                                        .content(new Content()
+                                                .addMediaType("application/json", new MediaType()
+                                                        .schema(new Schema<>().$ref("#/components/schemas/ApiResponse")))))
+                                .addApiResponse("404", new ApiResponse()
+                                        .description("Group not found"))));
     }
 
     private static PathItem createScalePath() {
