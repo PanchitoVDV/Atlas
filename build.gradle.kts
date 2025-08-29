@@ -46,8 +46,8 @@ subprojects {
                 name = "mineplay"
                 url = uri("https://repo.mineplay.nl/private")
                 credentials {
-                    username = findProperty("mineplayUsername") as String
-                    password = findProperty("mineplayPassword") as String
+                    username = findProperty("mineplayUsername")?.toString() ?: ""
+                    password = findProperty("mineplayPassword")?.toString() ?: ""
                 }
                 authentication {
                     create<BasicAuthentication>("basic")
