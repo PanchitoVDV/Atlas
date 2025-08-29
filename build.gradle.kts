@@ -40,17 +40,19 @@ subprojects {
     }
 
 
-    publishing {
-        repositories {
-            maven {
-                name = "mineplay"
-                url = uri("https://repo.mineplay.nl/private")
-                credentials {
-                    username = findProperty("mineplayUsername")?.toString() ?: ""
-                    password = findProperty("mineplayPassword")?.toString() ?: ""
-                }
-                authentication {
-                    create<BasicAuthentication>("basic")
+    if (findProperty("mineplayUsername") != null && findProperty("mineplayPassword") != null) {
+        publishing {
+            repositories {
+                maven {
+                    name = "mineplay"
+                    url = uri("https://repo.mineplay.nl/private")
+                    credentials {
+                        username = findProperty("mineplayUsername") as String
+                        password = findProperty("mineplayPassword") as String
+                    }
+                    authentication {
+                        create<BasicAuthentication>("basic")
+                    }
                 }
             }
             publications {
@@ -63,4 +65,5 @@ subprojects {
             }
         }
     }
+
 }
