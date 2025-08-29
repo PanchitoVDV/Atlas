@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  atlas:
+    image: ghcr.io/panchitovdv/atlas/atlas:latest
+    container_name: atlas-server
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    ports:
+      - "9090:9090"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./atlas.yml:/root/atlas/atlas.yml
+      - ./groups:/root/atlas/groups
+      - ./servers:/root/atlas/servers
+      - ./templates:/root/atlas/templates
+      - ./data:/root/atlas/data
+      - ./cache:/root/atlas/cache
+      - ./logs:/root/atlas/logs
+    networks:
+      - atlas-network
+
+networks:
+  atlas-network:
+    name: atlas-network
