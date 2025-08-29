@@ -29,7 +29,7 @@ jobs:
 
       # Step 3: Build with Gradle
       - name: Build JAR
-        run: ./gradlew :atlas-base:build
+        run: ./gradlew :atlas-base:shadowJar
 
       # Step 4: Log in to GHCR (optional – only if pushing images)
       - name: Log in to GitHub Container Registry
