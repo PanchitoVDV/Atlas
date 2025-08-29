@@ -44,7 +44,8 @@ jobs:
       - name: Build Docker image
         run: |
           cp atlas-base/build/libs/atlas-base-*.jar atlas-base-1.0.0.jar
-          docker build -t ghcr.io/${{ github.repository }}/atlas:latest Atlas
+          REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          docker build -t ghcr.io/$REPO_LC/atlas:latest .
 
       # Step 6: Push Docker image
       - name: Push Docker image
